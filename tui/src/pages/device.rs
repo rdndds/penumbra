@@ -8,15 +8,16 @@ use std::time::{Duration, Instant};
 use hex::encode;
 use penumbra::core::devinfo::{DevInfoData, DeviceInfo};
 use penumbra::core::seccfg::LockFlag;
-use penumbra::{Device, DeviceBuilder, find_mtk_port};
+use penumbra::{Device, DeviceBuilder, MTKPort, find_mtk_port};
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use strum::IntoEnumIterator;
 use strum_macros::{AsRefStr, EnumIter};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
+use tokio::time::sleep;
 
 use crate::app::{AppCtx, AppPage};
 use crate::components::selectable_list::{
@@ -26,6 +27,14 @@ use crate::components::selectable_list::{
     SelectableListBuilder,
 };
 use crate::pages::Page;
+
+type DeviceResult = Result<(Arc<Mutex<Device>>, DeviceInfo), String>;
+
+enum AppEvent {
+    DevicePortFound,
+    DeviceInitResult(DeviceResult),
+    SetLockStateResult(Result<(), String>, String),
+}
 
 #[derive(Clone, PartialEq, Default)]
 enum DeviceStatus {
@@ -56,8 +65,9 @@ pub struct DevicePage {
     device_info: Option<DeviceInfo>,
     // This is used only in render, since render is not async, and we can't await inside it.
     devinfo_data: Option<DevInfoData>,
-    // device_event_tx: watch::Sender<Option<DeviceEvent>>,
-    // device_event_rx: watch::Receiver<Option<DeviceEvent>>,
+    is_polling: bool,
+    event_tx: mpsc::Sender<AppEvent>,
+    event_rx: mpsc::Receiver<AppEvent>,
 }
 
 impl DevicePage {
@@ -82,6 +92,8 @@ impl DevicePage {
             .build()
             .unwrap();
 
+        let (event_tx, event_rx) = mpsc::channel(10);
+
         Self {
             menu,
             actions,
@@ -91,66 +103,82 @@ impl DevicePage {
             last_poll: Instant::now(),
             device_info: None,
             devinfo_data: None,
+            is_polling: false,
+            event_tx,
+            event_rx,
         }
     }
 
-    async fn poll_device(&mut self, ctx: &mut AppCtx) -> Result<(), DeviceStatus> {
-        if self.status == DeviceStatus::DAReady || matches!(self.status, DeviceStatus::Error(_)) {
-            return Ok(());
-        }
-
-        if self.status == DeviceStatus::Initializing {
-            return Ok(());
-        }
-
-        if self.status == DeviceStatus::WaitingForDevice
-            && self.last_poll.elapsed() < Duration::from_millis(500)
-        {
-            return Ok(());
+    fn poll_device(&mut self, ctx: &mut AppCtx) {
+        if self.is_polling || self.last_poll.elapsed() < Duration::from_millis(500) {
+            return;
         }
 
         self.last_poll = Instant::now();
+        self.is_polling = true;
 
-        let Some(port) = find_mtk_port().await else {
-            return Ok(());
-        };
+        let da_data: Option<Vec<u8>> = ctx.loader().map(|l| l.file().da_raw_data.clone());
+        let tx = self.event_tx.clone();
 
-        self.status = DeviceStatus::Initializing;
+        tokio::spawn(async move {
+            let port: Box<dyn MTKPort>;
+            loop {
+                match find_mtk_port().await {
+                    Some(p) => {
+                        port = p;
+                        break;
+                    }
+                    None => {
+                        sleep(Duration::from_millis(500)).await;
+                    }
+                }
+            }
 
-        let da_data: Vec<u8> = ctx
-            .loader()
-            .map(|loader| loader.file().da_raw_data.as_slice().to_vec())
-            .ok_or_else(|| DeviceStatus::Error("No DA loader in context".to_string()))?;
+            if tx.send(AppEvent::DevicePortFound).await.is_err() {
+                return;
+            }
+
+            let result = Self::init_device(port, da_data).await;
+            let _ = tx.send(AppEvent::DeviceInitResult(result)).await;
+        });
+    }
+
+    async fn init_device(port: Box<dyn MTKPort>, da_data: Option<Vec<u8>>) -> DeviceResult {
+        let da_data = da_data.ok_or_else(|| "No DA loader in context".to_string())?;
 
         let mut dev = DeviceBuilder::default()
             .with_da_data(da_data)
             .with_mtk_port(port)
             .build()
-            .map_err(|e| DeviceStatus::Error(format!("Device init failed: {e}")))?;
+            .map_err(|e| format!("Device build failed: {e}"))?;
 
-        dev.init().await.map_err(|e| DeviceStatus::Error(format!("Device init failed: {e}")))?;
-        dev.enter_da_mode()
-            .await
-            .map_err(|e| DeviceStatus::Error(format!("Failed to enter DA mode: {e}")))?;
+        dev.init().await.map_err(|e| format!("Device init failed: {e}"))?;
+        dev.enter_da_mode().await.map_err(|e| format!("Failed to enter DA mode: {e}"))?;
 
-        self.status = DeviceStatus::DAReady;
-        self.device_info = Some(dev.dev_info.clone());
-        self.devinfo_data = Some(dev.dev_info.get_data().await);
-        self.device = Some(Arc::new(Mutex::new(dev)));
-        Ok(())
+        let dev_info = dev.dev_info.clone();
+        Ok((Arc::new(Mutex::new(dev)), dev_info))
     }
 
-    async fn set_device_lock_state(&mut self, flag: LockFlag) -> Result<Vec<u8>, String> {
-        match &self.device {
-            Some(dev_arc) => {
-                let mut dev = dev_arc.lock().await;
-                match dev.set_seccfg_lock_state(flag).await {
-                    Some(response) => Ok(response),
-                    None => Err("Failed to change lock state".to_string()),
-                }
-            }
-            None => Err("No device connected".to_string()),
+    fn set_device_lock_state(&mut self, flag: LockFlag, label: String) {
+        if self.device.is_none() {
+            self.status = DeviceStatus::Error("No device connected".to_string());
+            return;
         }
+
+        let tx = self.event_tx.clone();
+        let dev_arc = self.device.clone().unwrap();
+
+        tokio::spawn(async move {
+            let result = async {
+                let mut dev = dev_arc.lock().await;
+                dev.set_seccfg_lock_state(flag)
+                    .await
+                    .map(|_| ())
+                    .ok_or_else(|| "Failed to change lock state".to_string())
+            }
+            .await;
+            let _ = tx.send(AppEvent::SetLockStateResult(result, label)).await;
+        });
     }
 }
 
@@ -169,18 +197,7 @@ impl Page for DevicePage {
                             DeviceAction::LockBootloader => ("Lock", LockFlag::Lock),
                             _ => unreachable!(),
                         };
-
-                        match self.set_device_lock_state(flag).await {
-                            Ok(_) => {
-                                self.status_message = Some((
-                                    format!("{label} done."),
-                                    Style::default().fg(Color::Green).bg(Color::Black),
-                                ));
-                            }
-                            Err(e) => {
-                                self.status = DeviceStatus::Error(format!("{label} failed: {e}"));
-                            }
-                        }
+                        self.set_device_lock_state(flag, label.to_string());
                     }
                     DeviceAction::BackToMenu => ctx.change_page(AppPage::Welcome),
                 }
@@ -256,14 +273,45 @@ impl Page for DevicePage {
         self.last_poll = Instant::now();
         self.device = None;
         self.device_info = None;
+        self.is_polling = false;
+        while self.event_rx.try_recv().is_ok() {}
     }
 
     async fn on_exit(&mut self, _ctx: &mut AppCtx) {}
 
     async fn update(&mut self, ctx: &mut AppCtx) {
-        if let Err(e) = self.poll_device(ctx).await {
-            self.status = e;
+        if let Ok(event) = self.event_rx.try_recv() {
+            match event {
+                AppEvent::DevicePortFound => {
+                    self.status = DeviceStatus::Initializing;
+                }
+                AppEvent::DeviceInitResult(Ok((dev, dev_info))) => {
+                    self.status = DeviceStatus::DAReady;
+                    self.device_info = Some(dev_info);
+                    self.devinfo_data = Some(self.device_info.as_ref().unwrap().get_data().await);
+                    self.device = Some(dev);
+                    self.is_polling = false;
+                }
+                AppEvent::DeviceInitResult(Err(_)) => {
+                    self.status = DeviceStatus::WaitingForDevice;
+                    self.is_polling = false;
+                }
+                AppEvent::SetLockStateResult(Ok(_), label) => {
+                    self.status_message = Some((
+                        format!("{label} done."),
+                        Style::default().fg(Color::Green).bg(Color::Black),
+                    ));
+                }
+                AppEvent::SetLockStateResult(Err(e), label) => {
+                    self.status = DeviceStatus::Error(format!("{label} failed: {e}"));
+                }
+            }
         }
+
+        if self.status == DeviceStatus::WaitingForDevice {
+            self.poll_device(ctx);
+        }
+
         if self.last_poll.elapsed() > Duration::from_secs(5) {
             self.devinfo_data = match &self.device_info {
                 Some(info) => Some(info.get_data().await),
