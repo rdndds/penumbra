@@ -14,7 +14,7 @@ fn parse_pattern(input: &str) -> Result<HexPattern> {
         .filter(|c| !c.is_whitespace() && *c != ',' && *c != '-' && *c != ':')
         .collect();
 
-    if filtered.len() % 2 != 0 {
+    if !filtered.len().is_multiple_of(2) {
         return Err(Error::penumbra("Pattern has an odd number of hex digits"));
     }
 
@@ -27,14 +27,14 @@ fn parse_pattern(input: &str) -> Result<HexPattern> {
             } else {
                 u8::from_str_radix(pair, 16)
                     .map(Some)
-                    .map_err(|_| Error::penumbra(&format!("Invalid hex byte in pattern: {}", pair)))
+                    .map_err(|_| Error::penumbra(format!("Invalid hex byte in pattern: {}", pair)))
             }
         })
         .collect()
 }
 
 fn pattern_matches(window: &[u8], pattern: &HexPattern) -> bool {
-    pattern.iter().zip(window).all(|(p, &b)| p.map_or(true, |v| v == b))
+    pattern.iter().zip(window).all(|(p, &b)| p.is_none_or(|v| v == b))
 }
 
 /// Checks if a data window matches the given pattern, considering wildcards.

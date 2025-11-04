@@ -133,8 +133,7 @@ impl<'a> SEJCrypto<'a> {
 
     // Note: This modifies the data directly, it does not return a new Vec
     fn xor(&self, data: &mut [u8]) {
-        for i in 0..4 {
-            let pad = HACC_CFG_1[i];
+        for (i, &pad) in HACC_CFG_1.iter().enumerate().take(4) {
             let offset = i * 4;
             let orig = u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap());
             data[offset..offset + 4].copy_from_slice(&(orig ^ pad).to_le_bytes());

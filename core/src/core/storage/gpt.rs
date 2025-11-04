@@ -68,12 +68,7 @@ pub fn parse_gpt(data: &[u8], storage_type: StorageType) -> Result<Vec<Partition
                 .collect::<Vec<u16>>(),
         );
 
-        partitions.push(Partition::new(
-            &part_name,
-            part_size as usize,
-            part_addr,
-            part_kind.clone(),
-        ));
+        partitions.push(Partition::new(&part_name, part_size as usize, part_addr, part_kind));
     }
 
     Ok(partitions)

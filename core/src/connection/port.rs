@@ -39,14 +39,13 @@ pub async fn find_mtk_port() -> Option<Box<dyn MTKPort>> {
     {
         use crate::connection::backend::serial_backend;
         let serial_ports = serial_backend::find_mtk_serial_ports();
-        if !serial_ports.is_empty() {
-            if let Some(port) =
+        if !serial_ports.is_empty()
+            && let Some(port) =
                 serial_backend::SerialMTKPort::from_port_info(serial_ports[0].clone())
-            {
-                let mut boxed_port: Box<dyn MTKPort> = Box::new(port);
-                if boxed_port.open().await.is_ok() {
-                    return Some(boxed_port);
-                }
+        {
+            let mut boxed_port: Box<dyn MTKPort> = Box::new(port);
+            if boxed_port.open().await.is_ok() {
+                return Some(boxed_port);
             }
         }
     }
