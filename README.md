@@ -59,7 +59,7 @@ For using the TUI, first run the executable, then:
 
 Penumbra is still in early development, thus it can break auite easily.
 If so, you can open an issue attaching debug logs.<br>
-To get debug logs, set the environment variabile `RUST_LOG=debug`. A file called `app.log` will be created in thr current directory. 
+To get debug logs, set the environment variabile `RUST_LOG=debug`. A file called `app.log` will be created in thr current directory.
 
 Note: Penumbra currently only supports MT6768 devices with eMMC (so no UFS for now). Issues reporting incompatibility with other chipset will be ignored until broader support is added.
 
@@ -81,15 +81,15 @@ On any other distribution, you'll need to install the following dependencies:
 ### Current Roadmap
 
 Core:
-* [ ] Add UFS support
+* [x] Add UFS support
 * [ ] Dynamically determine SEJ base (for more chipsets support)
-* [ ] Build DA extensions from source
+* [x] Build DA extensions from source
 * [ ] Limit extensions only commands when exts are not added to avoid timeouts
-* [ ] Add a way to restore state
-* [ ] Clean up duplicated code
+* [x] Add a way to restore state
+* [x] Clean up duplicated code
 * [ ] Add support for BROM mode (and setup DRAM)
 * [ ] Add support for DA SLA and preloader auth
-* [ ] Add target config to Device Info (SBC, DAA and SLA)
+* [x] Add target config to Device Info (SBC, DAA and SLA)
 * [ ] Improve support for preloader/brom only connection (for testing purposes with just preloader commands)
 * [ ] Improve DA parsing and add DA patching
 
@@ -115,6 +115,7 @@ Other learning resources I suggest are the following
 * [moto-experiments](https://github.com/R0rt1z2/moto-experiments)
 * [kaeru](https://github.com/R0rt1z2/kaeru)
 * [Carbonara exploit](https://shomy.is-a.dev/penumbra/Mediatek/Exploits/Carbonara)
+* [mtk-payloads](https://github.com/shomykohai/mtk-payloads)
 
 ## License
 
