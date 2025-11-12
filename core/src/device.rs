@@ -260,6 +260,7 @@ impl Device {
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 
+        self.get_partitions().await;
         Ok(protocol)
     }
 
@@ -289,6 +290,7 @@ impl Device {
     }
 
     pub async fn get_partitions(&mut self) -> Vec<Partition> {
+        info!("Retrieving partition information...");
         let cached = self.dev_info.partitions().await;
         if !cached.is_empty() {
             return cached;
@@ -314,6 +316,7 @@ impl Device {
             if (protocol.read_flash(0x0, 0x8000, user_section, &mut progress, &mut cursor).await)
                 .is_err()
             {
+                info!("Failed to read GPT data from device.");
                 return Vec::new();
             }
         }

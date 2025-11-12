@@ -104,6 +104,7 @@ pub enum Cmd {
     ExtReadRpmb = 0x0F0009,
     ExtWriteRpmb = 0x0F000A,
     ExtSej = 0x0F000B,
+    ExtSetupDaCtx = 0x0F000C,
 }
 
 #[repr(u32)]

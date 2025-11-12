@@ -15,7 +15,7 @@
 use log::{debug, info};
 
 use crate::da::DAProtocol;
-use crate::da::xflash::{Cmd, DataType, XFlash};
+use crate::da::xflash::{Cmd, XFlash};
 use crate::error::{Error, Result};
 use crate::extract_ptr;
 use crate::utilities::patching::{HEX_NOT_FOUND, find_pattern, patch_ptr};
@@ -47,10 +47,6 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     info!("DA extensions uploaded");
 
     let ack = xflash.devctrl(Cmd::ExtAck, None).await?;
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::proto(format!("DA extensions failed to start: {:#X}", status)));
-    }
 
     // Ack must be 0xA1A2A3A4
     if ack.len() < 4 || ack[0..4] != [0xA4, 0xA3, 0xA2, 0xA1] {
@@ -162,82 +158,20 @@ fn prepare_extensions(xflash: &XFlash) -> Option<Vec<u8>> {
     Some(da_ext_data)
 }
 
-// TODO: Rewrite these
 pub async fn read32_ext(xflash: &mut XFlash, addr: u32) -> Result<u32> {
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    if xflash.get_status().await? != 0 {
-        return Err(Error::proto("DEVICE_CTRL failed"));
-    }
-
-    xflash.send_cmd(Cmd::ExtReadRegister).await?;
-    if xflash.get_status().await? != 0 {
-        return Err(Error::proto("ExtReadRegister failed"));
-    }
-
-    let addr_bytes = addr.to_le_bytes();
-
-    let mut hdr = [0u8; 12];
-    hdr[0..4].copy_from_slice(&(Cmd::Magic as u32).to_le_bytes());
-    hdr[4..8].copy_from_slice(&(DataType::ProtocolFlow as u32).to_le_bytes());
-    hdr[8..12].copy_from_slice(&4u32.to_le_bytes()); // length = 4
-
-    debug!("[TX] Ext: sending address: 0x{:08X}", addr);
-    xflash.conn.port.write_all(&hdr).await?;
-    xflash.conn.port.write_all(&addr_bytes).await?;
-    xflash.conn.port.flush().await?;
+    xflash.devctrl(Cmd::ExtReadRegister, Some(&[&addr.to_le_bytes()])).await?;
 
     let payload = xflash.read_data().await?;
-    if payload.len() >= 4 {
-        let status = xflash.get_status().await?;
-        if status != 0 {
-            return Err(Error::proto(format!("ExtReadRegister failed: {:#X}", status)));
-        }
-        Ok(u32::from_le_bytes(payload[0..4].try_into().unwrap()))
-    } else {
-        let value = xflash.get_status().await?;
-        Ok(value)
-    }
+    status_ok!(xflash);
+
+    Ok(u32::from_le_bytes(payload[0..4].try_into().unwrap()))
 }
 
 pub async fn write32_ext(xflash: &mut XFlash, addr: u32, value: u32) -> Result<()> {
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    if xflash.get_status().await? != 0 {
-        return Err(Error::proto("DEVICE_CTRL failed"));
-    }
-
-    xflash.send_cmd(Cmd::ExtWriteRegister).await?;
-    if xflash.get_status().await? != 0 {
-        return Err(Error::proto("ExtWriteRegister failed"));
-    }
-
     let addr_bytes = addr.to_le_bytes();
-
-    let mut hdr1 = [0u8; 12];
-    hdr1[0..4].copy_from_slice(&(Cmd::Magic as u32).to_le_bytes());
-    hdr1[4..8].copy_from_slice(&(DataType::ProtocolFlow as u32).to_le_bytes());
-    hdr1[8..12].copy_from_slice(&4u32.to_le_bytes());
-
-    debug!("[TX] Ext: sending address: 0x{:08X}", addr);
-    xflash.conn.port.write_all(&hdr1).await?;
-    xflash.conn.port.write_all(&addr_bytes).await?;
-    xflash.conn.port.flush().await?;
-
     let value_bytes = value.to_le_bytes();
 
-    let mut hdr2 = [0u8; 12];
-    hdr2[0..4].copy_from_slice(&(Cmd::Magic as u32).to_le_bytes());
-    hdr2[4..8].copy_from_slice(&(DataType::ProtocolFlow as u32).to_le_bytes());
-    hdr2[8..12].copy_from_slice(&4u32.to_le_bytes());
-
-    debug!("[TX] Ext: sending value: 0x{:08X}", value);
-    xflash.conn.port.write_all(&hdr2).await?;
-    xflash.conn.port.write_all(&value_bytes).await?;
-    xflash.conn.port.flush().await?;
-
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::proto(format!("ExtWriteRegister failed: {:#X}", status)));
-    }
+    xflash.devctrl(Cmd::ExtWriteRegister, Some(&[&addr_bytes, &value_bytes])).await?;
 
     Ok(())
 }

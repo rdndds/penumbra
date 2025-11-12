@@ -2,14 +2,14 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use log::{debug, error, info};
+use log::{debug, info};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::core::storage::PartitionKind;
 use crate::da::DAProtocol;
 use crate::da::xflash::XFlash;
 use crate::da::xflash::cmds::*;
-use crate::error::{Error, Result, XFlashError};
+use crate::error::{Error, Result};
 
 pub async fn read_flash<F, W>(
     xflash: &mut XFlash,
@@ -52,22 +52,13 @@ where
     param.extend_from_slice(&nand_ext.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
 
     xflash.send_cmd(Cmd::ReadData).await?;
-
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
-
-    xflash.send_data(&param).await?;
-
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
+    xflash.send(&param).await?;
+    status_ok!(xflash);
 
     let mut bytes_read = 0;
 
     // Read chunk, send acknowledgment, status, repeat until profit
+    progress(0, size);
     loop {
         let chunk = xflash.read_data().await?;
         if chunk.is_empty() {
@@ -78,36 +69,26 @@ where
         writer.write_all(&chunk).await?;
         bytes_read += chunk.len();
 
-        let mut ack_hdr = [0u8; 12];
-        ack_hdr[0..4].copy_from_slice(&(Cmd::Magic as u32).to_le_bytes());
-        ack_hdr[4..8].copy_from_slice(&(DataType::ProtocolFlow as u32).to_le_bytes());
-        ack_hdr[8..12].copy_from_slice(&4u32.to_le_bytes());
         let ack_payload = [0u8; 4];
 
-        xflash.conn.port.write_all(&ack_hdr).await?;
-        xflash.conn.port.write_all(&ack_payload).await?;
+        xflash.send(&ack_payload).await?;
 
-        let status = xflash.get_status().await?;
-        debug!("Status after chunk: 0x{:08X}", status);
+        debug!("Chunk of {} bytes read.", chunk.len());
+        progress(bytes_read, size);
 
-        if status != 0 {
-            debug!("Breaking loop, status: 0x{:08X}", status);
-            break;
-        }
         if bytes_read >= size {
             debug!("Requested size read. Breaking.");
             break;
         }
 
-        progress(bytes_read, size);
-
-        debug!("Read {}/{} bytes...", bytes_read, size);
+        debug!("Read {:X}/{:X} bytes...", bytes_read, size);
     }
+
+    info!("Flash read completed, 0x{:X} bytes read.", bytes_read);
 
     Ok(())
 }
 
-// TODO: Actually verify if the partition allows writing data.len() bytes
 pub async fn write_flash<F, R>(
     xflash: &mut XFlash,
     addr: u64,
@@ -126,9 +107,10 @@ where
     // Next time, don't put this after Cmd::WriteData,
     // or don't expect it to work :/
     let chunk_size = get_write_packet_length(xflash).await?;
-    info!("Using chunk size of {} bytes", chunk_size);
+    debug!("Using chunk size of {} bytes", chunk_size);
 
-    let storage_type = 1u32; // TODO: Add support for other storage types
+    let storage_type = xflash.get_storage_type().await as u32;
+
     let partition_type = section.as_u32();
     let nand_ext = [0u32; 8];
     let mut param = Vec::new();
@@ -138,24 +120,14 @@ where
     param.extend_from_slice(&(size as u64).to_le_bytes());
     param.extend_from_slice(&nand_ext.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
 
-    debug!("Sending write data cmd!");
-    // TODO: Consider making a send_cmd_with_payload function
     xflash.send_cmd(Cmd::WriteData).await?;
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
+    xflash.send(&param).await?;
 
-    debug!("Write data cmd sent, sending parameters...");
-    // Note to self: send_data already checks the status, so DON'T check it again!!
-    // Also, perhaps make it return the status DUH!
-    xflash.send_data(&param).await?;
-
-    debug!("Parameters sent!");
     let mut buffer = vec![0u8; chunk_size];
     let mut bytes_written = 0;
 
     debug!("Starting to write data in chunks of {} bytes...", chunk_size);
+    progress(0, size);
     loop {
         if bytes_written >= size {
             break;
@@ -185,33 +157,14 @@ where
         // For whoever is reading this code and has no clue what this is doing:
         // Just sum all bytes then AND with 0xFFFF :D!!!
         let checksum = chunk.iter().fold(0u32, |total, &byte| total + byte as u32) & 0xFFFF;
-
-        // Mediatek be like: "Coherent protocol? What is that?"
-        // And that's why here instead of doing the usual of sending the header (checksum included)
-        // then the data, we need to send three different parts, with one being all zeros (why???).
-        // But alas, who am I to judge, at least they didn't make an XML protocol... right?
-        xflash.send(&0u32.to_be_bytes(), DataType::ProtocolFlow as u32).await?;
-
-        debug!("Sending checksum {} for next chunk", checksum);
-        xflash.send(&checksum.to_le_bytes(), DataType::ProtocolFlow as u32).await?;
-
-        debug!("Sending chunk of {} bytes", chunk.len());
-        xflash.send_data(chunk).await?;
+        xflash.send_data(&[&0u32.to_le_bytes(), &checksum.to_le_bytes(), chunk]).await?;
 
         bytes_written += chunk.len();
-
         progress(bytes_written, size);
-
         debug!("Written {}/{} bytes...", bytes_written, size);
     }
 
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        error!("Device returned status {:#X} after writing data!", status);
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
-
-    info!("Flash write completed, {} bytes written.", bytes_written);
+    info!("Flash write completed, 0x{:X} bytes written.", bytes_written);
 
     Ok(())
 }
@@ -233,27 +186,15 @@ where
     // relies on the DA to find the partition by name.
     // Also, this command doesn't support writing only a part of the partition,
     // it will always write the whole partition with the data provided.
-
     let chunk_size = get_write_packet_length(xflash).await?;
 
     xflash.send_cmd(Cmd::Download).await?;
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
-
-    xflash.send(part_name.as_bytes(), DataType::ProtocolFlow as u32).await?;
-
-    xflash.send(&size.to_le_bytes()[..], DataType::ProtocolFlow as u32).await?;
-
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
+    xflash.send_data(&[part_name.as_bytes(), &size.to_le_bytes()]).await?;
 
     let mut buffer = vec![0u8; chunk_size];
     let mut bytes_written = 0;
 
+    progress(0, size);
     loop {
         let remaining = size - bytes_written;
         let to_read = remaining.min(chunk_size);
@@ -265,35 +206,21 @@ where
 
         let chunk = &buffer[..bytes_read];
 
-        // TODO: Figure out what this 0u32 is for — protocol-specific
-        xflash.send(&0u32.to_le_bytes(), DataType::ProtocolFlow as u32).await?;
-
         let checksum = chunk.iter().fold(0u32, |total, &byte| total + byte as u32) & 0xFFFF;
-        xflash.send(&checksum.to_le_bytes(), DataType::ProtocolFlow as u32).await?;
-        xflash.send(chunk, DataType::ProtocolFlow as u32).await?;
+        xflash.send_data(&[&0u32.to_le_bytes(), &checksum.to_le_bytes(), chunk]).await?;
 
         bytes_written += bytes_read;
 
         progress(bytes_written, size);
     }
 
-    debug!("Upload completed, {} bytes sent.", size);
-
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        error!("Device returned {:#X} after data upload", status);
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
+    debug!("Upload completed, 0x{:X} bytes sent.", size);
 
     Ok(())
 }
 
-async fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
+pub async fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
     let packet_length = xflash.devctrl(Cmd::GetPacketLength, None).await?;
-    let status = xflash.get_status().await?;
-    if status != 0 {
-        return Err(Error::XFlash(XFlashError::from_code(status)));
-    }
 
     if packet_length.len() < 8 {
         return Err(Error::proto("Received packet length is too short"));
@@ -309,25 +236,26 @@ async fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
     let write_len = u32::from_le_bytes(write_buf) as usize;
     let read_len = u32::from_le_bytes(read_buf) as usize;
 
+    xflash.write_packet_length = Some(write_len);
+    xflash.read_packet_length = Some(read_len);
+
     Ok((write_len, read_len))
 }
 
-async fn get_write_packet_length(xflash: &mut XFlash) -> Result<usize> {
+pub async fn get_write_packet_length(xflash: &mut XFlash) -> Result<usize> {
     if xflash.read_packet_length.is_some() {
         return Ok(xflash.read_packet_length.unwrap());
     }
 
     let (write_len, _) = get_packet_length(xflash).await?;
-    xflash.write_packet_length = Some(write_len);
     Ok(write_len)
 }
 
-async fn _get_read_packet_length(xflash: &mut XFlash) -> Result<usize> {
+pub async fn _get_read_packet_length(xflash: &mut XFlash) -> Result<usize> {
     if xflash.read_packet_length.is_some() {
         return Ok(xflash.read_packet_length.unwrap());
     }
 
     let (_, read_len) = get_packet_length(xflash).await?;
-    xflash.read_packet_length = Some(read_len);
     Ok(read_len)
 }
