@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use clap::{Args, Subcommand};
+use clap::{Args, ValueEnum};
 use log::info;
 use penumbra::Device;
 use penumbra::core::seccfg::LockFlag;
@@ -15,7 +15,7 @@ use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, DaArgs};
 use crate::cli::state::PersistedDeviceState;
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug, ValueEnum, Clone)]
 pub enum SeccfgAction {
     Unlock,
     Lock,
@@ -23,7 +23,6 @@ pub enum SeccfgAction {
 
 #[derive(Args, Debug)]
 pub struct SeccfgArgs {
-    #[command(subcommand)]
     pub action: SeccfgAction,
     #[command(flatten)]
     pub da: DaArgs,
