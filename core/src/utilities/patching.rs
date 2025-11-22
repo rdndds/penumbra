@@ -112,3 +112,7 @@ pub fn patch_ptr(data: &mut [u8], ptr_off: usize, value: u32, base_addr: u32, th
         data[ptr_off..ptr_off + 4].copy_from_slice(&addr.to_le_bytes());
     }
 }
+
+pub fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02X}", b)).collect()
+}
