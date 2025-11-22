@@ -74,11 +74,11 @@ impl UsbMTKPort {
                 match ep.direction() {
                     Direction::In => {
                         in_ep = Some(ep.address());
-                        self.in_max_packet_size = ep.max_packet_size() as usize;
+                        self.in_max_packet_size = ep.max_packet_size();
                     }
                     Direction::Out => {
                         out_ep = Some(ep.address());
-                        self.out_max_packet_size = ep.max_packet_size() as usize;
+                        self.out_max_packet_size = ep.max_packet_size();
                     }
                 }
             }
