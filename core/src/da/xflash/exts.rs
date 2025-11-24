@@ -175,3 +175,27 @@ pub async fn write32_ext(xflash: &mut XFlash, addr: u32, value: u32) -> Result<(
 
     Ok(())
 }
+
+pub async fn sej(
+    xflash: &mut XFlash,
+    data: &[u8],
+    encrypt: bool,
+    legacy: bool,
+    anti_clone: bool,
+    xor: bool,
+) -> Result<Vec<u8>> {
+    let mut params = [0u8; 8];
+
+    params[0] = if encrypt { 1 } else { 0 };
+    params[1] = if legacy { 1 } else { 0 };
+    params[2] = if anti_clone { 1 } else { 0 };
+    params[3] = if xor { 1 } else { 0 };
+    params[4..8].copy_from_slice(&(data.len() as u32).to_le_bytes());
+
+    xflash.devctrl(Cmd::ExtSej, Some(&[&params, data])).await?;
+
+    let payload = xflash.read_data().await?;
+    status_ok!(xflash);
+
+    Ok(payload)
+}
