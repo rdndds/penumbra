@@ -3,15 +3,17 @@
 # SPDX-FileCopyrightText: 2025 Shomy
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
+import struct
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List, Optional
-import struct
+
 
 class DAType(Enum):
     LEGACY = auto()
     V5 = auto()
     V6 = auto()
+
 
 @dataclass
 class DAEntryRegion:
@@ -45,14 +47,13 @@ class DAFile:
         self.das = das
 
     @staticmethod
-    def parse_da(raw_data: bytes) -> 'DAFile':
-        if len(raw_data) < 0x6C:
+    def parse_da(raw_data: bytes) -> "DAFile":
+        if len(raw_data) < 0x6C + 0xDC:
             raise ValueError("Invalid DA file: Too short")
 
         hdr = raw_data[:0x6C]
 
-
-        if hdr.startswith(b'\xDA\xDA'):
+        if raw_data[0x6C + 0xD8 : 0x6C + 0xD8 + 2] == b"\xda\xda":
             da_type = DAType.LEGACY
         elif b"MTK_DA_v6" in hdr:
             da_type = DAType.V6
@@ -70,6 +71,7 @@ class DAFile:
         das = []
 
         for i in range(num_socs):
+            inner_da_type = da_type
             start = 0x6C + i * da_entry_size
             end = start + da_entry_size
             da_entry = raw_data[start:end]
@@ -83,27 +85,36 @@ class DAFile:
             region_offset = 0x14
 
             for _ in range(region_count):
-                offset, length, addr, _, sig_len = struct.unpack_from("<IIIII", da_entry, region_offset)
-                region_data = raw_data[offset:offset + length]
+                offset, length, addr, _, sig_len = struct.unpack_from(
+                    "<IIIII", da_entry, region_offset
+                )
+                region_data = raw_data[offset : offset + length]
 
-                regions.append(DAEntryRegion(
-                    data=region_data,
-                    offset=offset,
-                    length=length,
-                    addr=addr,
-                    region_length=length - sig_len,
-                    sig_len=sig_len
-                ))
+                if not inner_da_type == DAType.LEGACY and b"AND_SECRO_v" in region_data:
+                    inner_da_type = DAType.LEGACY
+
+                regions.append(
+                    DAEntryRegion(
+                        data=region_data,
+                        offset=offset,
+                        length=length,
+                        addr=addr,
+                        region_length=length - sig_len,
+                        sig_len=sig_len,
+                    )
+                )
 
                 region_offset += 20
 
-            das.append(DA(
-                da_type=da_type,
-                regions=regions,
-                magic=magic,
-                hw_code=hw_code,
-                hw_sub_code=hw_sub_code
-            ))
+            das.append(
+                DA(
+                    da_type=inner_da_type,
+                    regions=regions,
+                    magic=magic,
+                    hw_code=hw_code,
+                    hw_sub_code=hw_sub_code,
+                )
+            )
 
         return DAFile(da_raw_data=raw_data, da_type=da_type, das=das)
 
@@ -114,27 +125,26 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print(f"Usage: {sys.argv[0]} <da_file>")
         sys.exit(1)
-    
+
     da_file_path = sys.argv[1]
     with open(da_file_path, "rb") as f:
         da_raw_data = f.read()
-    
+
     da_file = DAFile.parse_da(da_raw_data)
 
-    print("="*60)
-    print(f"DA Type: {da_file.da_type.name}")
+    print("=" * 60)
+    print(f"DA Header Type: {da_file.da_type.name}")
     print(f"Number of SoCs: {len(da_file.das)}")
-    print("="*60)
-    
+    print("=" * 60)
 
     for i, da in enumerate(da_file.das):
         print(f"[SoC {i}]")
+        print(f"  DA Mode: {da.da_type.name}")
         print(f"  HW Code     : 0x{da.hw_code:04X}")
         print(f"  HW Sub Code : 0x{da.hw_sub_code:04X}")
         print(f"  Magic       : 0x{da.magic:04X}")
         print(f"  Regions     : {len(da.regions)}")
         for j, region in enumerate(da.regions):
-            print(f"  Region {j}: Offset: 0x{region.offset:X}, Length: 0x{region.length:X}, Addr: 0x{region.addr:X}, Region Length: 0x{region.region_length:X}, Sig Len: 0x{region.sig_len:X}")
-    
-    
-    
+            print(
+                f"  Region {j}: Offset: 0x{region.offset:X}, Length: 0x{region.length:X}, Addr: 0x{region.addr:X}, Region Length: 0x{region.region_length:X}, Sig Len: 0x{region.sig_len:X}"
+            )
