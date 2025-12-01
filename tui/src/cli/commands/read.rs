@@ -13,7 +13,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::cli::MtkCommand;
-use crate::cli::common::{CONN_DA, DaArgs};
+use crate::cli::common::{CONN_DA, CommandMetadata, DaArgs};
 use crate::cli::helpers::AntumbraProgress;
 use crate::cli::state::PersistedDeviceState;
 
@@ -25,6 +25,24 @@ pub struct ReadArgs {
     pub partition: String,
     /// The destination file
     pub output_file: PathBuf,
+}
+
+impl CommandMetadata for ReadArgs {
+    fn aliases() -> &'static [&'static str] {
+        &["r"]
+    }
+
+    fn visible_aliases() -> &'static [&'static str] {
+        &["r"]
+    }
+
+    fn about() -> &'static str {
+        "Read a partition from the device and save it to a file."
+    }
+
+    fn long_about() -> &'static str {
+        "Read a specified partition from the device and save it to a file with the given output filename."
+    }
 }
 
 #[async_trait]

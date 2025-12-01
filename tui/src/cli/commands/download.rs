@@ -13,7 +13,7 @@ use tokio::fs::{File, metadata};
 use tokio::io::BufReader;
 
 use crate::cli::MtkCommand;
-use crate::cli::common::{CONN_DA, DaArgs};
+use crate::cli::common::{CONN_DA, CommandMetadata, DaArgs};
 use crate::cli::helpers::AntumbraProgress;
 use crate::cli::state::PersistedDeviceState;
 
@@ -25,6 +25,26 @@ pub struct DownloadArgs {
     pub partition: String,
     /// The file to download
     pub file: PathBuf,
+}
+
+impl CommandMetadata for DownloadArgs {
+    fn aliases() -> &'static [&'static str] {
+        &["dl"]
+    }
+
+    fn visible_aliases() -> &'static [&'static str] {
+        &["dl"]
+    }
+
+    fn about() -> &'static str {
+        "Download a file to a specified partition on the device."
+    }
+
+    fn long_about() -> &'static str {
+        "Download (flash) a file to a specificed partition on the device.
+        Use this command for flashing stock firmware on locked bootloader, or the device
+        will return write data not allowed error."
+    }
 }
 
 #[async_trait]

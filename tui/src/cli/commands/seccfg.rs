@@ -12,7 +12,7 @@ use penumbra::Device;
 use penumbra::core::seccfg::LockFlag;
 
 use crate::cli::MtkCommand;
-use crate::cli::common::{CONN_DA, DaArgs};
+use crate::cli::common::{CONN_DA, CommandMetadata, DaArgs};
 use crate::cli::state::PersistedDeviceState;
 
 #[derive(Debug, ValueEnum, Clone)]
@@ -26,6 +26,18 @@ pub struct SeccfgArgs {
     pub action: SeccfgAction,
     #[command(flatten)]
     pub da: DaArgs,
+}
+
+impl CommandMetadata for SeccfgArgs {
+    fn about() -> &'static str {
+        "Lock or unlock the seccfg partition on the device."
+    }
+
+    fn long_about() -> &'static str {
+        "Lock or unlock the seccfg partition on the device.
+        This command only work when the device is in DA mode and vulnerable to an exploit or unfused,
+        because it requires DA extensions to be loaded."
+    }
 }
 
 #[async_trait]

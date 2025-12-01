@@ -12,13 +12,31 @@ use log::info;
 use penumbra::Device;
 
 use crate::cli::MtkCommand;
-use crate::cli::common::{CONN_DA, DaArgs};
+use crate::cli::common::{CONN_DA, CommandMetadata, DaArgs};
 use crate::cli::state::PersistedDeviceState;
 
 #[derive(Args, Debug)]
 pub struct PgptArgs {
     #[command(flatten)]
     pub da: DaArgs,
+}
+
+impl CommandMetadata for PgptArgs {
+    fn aliases() -> &'static [&'static str] {
+        &["gpt"]
+    }
+
+    fn visible_aliases() -> &'static [&'static str] {
+        &["gpt"]
+    }
+
+    fn about() -> &'static str {
+        "Display the partition table of the connected device."
+    }
+
+    fn long_about() -> &'static str {
+        Self::about()
+    }
 }
 
 #[async_trait]

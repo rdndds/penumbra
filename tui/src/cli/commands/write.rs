@@ -12,7 +12,7 @@ use tokio::fs::{File, metadata};
 use tokio::io::BufReader;
 
 use crate::cli::MtkCommand;
-use crate::cli::common::{CONN_DA, DaArgs};
+use crate::cli::common::{CONN_DA, CommandMetadata, DaArgs};
 use crate::cli::helpers::AntumbraProgress;
 use crate::cli::state::PersistedDeviceState;
 
@@ -24,6 +24,25 @@ pub struct WriteArgs {
     pub partition: String,
     /// The file to download
     pub file: PathBuf,
+}
+
+impl CommandMetadata for WriteArgs {
+    fn aliases() -> &'static [&'static str] {
+        &["w"]
+    }
+
+    fn visible_aliases() -> &'static [&'static str] {
+        &["w"]
+    }
+
+    fn about() -> &'static str {
+        "Write a file to a specified partition on the device."
+    }
+
+    fn long_about() -> &'static str {
+        "Write (flash) a file to a specificed partition on the device.
+        If this command fails, use `download` instead."
+    }
 }
 
 #[async_trait]
