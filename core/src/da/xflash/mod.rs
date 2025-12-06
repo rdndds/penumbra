@@ -11,6 +11,6 @@ pub mod flash;
 mod patch;
 mod sec;
 mod storage;
-mod xflash;
+mod xflash_lib;
 pub use cmds::*;
-pub use xflash::*;
+pub use xflash_lib::*;
