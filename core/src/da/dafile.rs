@@ -77,7 +77,7 @@ impl DAFile {
             && &raw_data[legacy_test_pos..legacy_test_pos + 2] == b"\xDA\xDA"
         {
             DAType::Legacy
-        } else if hdr.windows(10).any(|w| w == b"MTK_DA_v6") {
+        } else if hdr.windows(9).any(|w| w == b"MTK_DA_v6") {
             DAType::V6
         } else {
             DAType::V5
