@@ -274,10 +274,7 @@ impl DAProtocol for XFlash {
         self.upload("PGPT".into(), &mut cursor, &mut progress).await.ok();
         self.send(&[0u8; 4]).await.ok();
 
-        match parse_gpt(&pgpt_data, storage_type) {
-            Ok(parts) => parts,
-            Err(_) => return Vec::new(),
-        }
+        parse_gpt(&pgpt_data, storage_type).unwrap_or_default()
     }
 
     async fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
