@@ -16,9 +16,11 @@ nusb = { version = "0.2.1", features = ["tokio"], optional = true }
 rusb = { version = "0.9.4", optional = true}
 serialport = { version = "4.7.3", optional = true }
 sha2 = "0.10.9"
+simple-xml = "0.1.10"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["fs", "time", "sync", "io-util"]}
 tokio-serial = { version = "5.4.5", optional = true }
+xmlcmd-derive = { path = "xmlcmd_derive" }
 
 [features]
 default = ["nusb"]
