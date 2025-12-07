@@ -13,8 +13,8 @@ use crate::connection::port::{ConnectionType, MTKPort};
 use crate::core::crypto::config::CryptoIO;
 use crate::core::devinfo::{DevInfoData, DeviceInfo};
 use crate::core::seccfg::LockFlag;
-use crate::da::{DAFile, DAProtocol, DAType, XFlash};
 use crate::core::storage::{Partition, PartitionKind};
+use crate::da::{DAFile, DAProtocol, DAType, XFlash, Xml};
 use crate::error::{Error, Result};
 
 /// A builder for creating a new [`Device`].
@@ -255,6 +255,7 @@ impl Device {
 
         let protocol: Box<dyn DAProtocol + Send> = match da.da_type {
             DAType::V5 => Box::new(XFlash::new(conn, da, self.dev_info.clone())),
+            DAType::V6 => Box::new(Xml::new(conn, da, self.dev_info.clone())),
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 
