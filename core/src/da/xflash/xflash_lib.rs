@@ -8,6 +8,7 @@ use log::{debug, error, info, warn};
 
 use crate::connection::Connection;
 use crate::core::devinfo::DeviceInfo;
+use crate::core::emi::extract_emi_settings;
 use crate::core::storage::Storage;
 use crate::da::xflash::cmds::*;
 use crate::da::xflash::exts::boot_extensions;
@@ -18,6 +19,7 @@ use crate::error::{Error, Result, XFlashError};
 pub struct XFlash {
     pub conn: Connection,
     pub da: DA,
+    pub pl: Option<Vec<u8>>,
     pub dev_info: DeviceInfo,
     pub(super) using_exts: bool,
     pub(super) read_packet_length: Option<usize>,
@@ -32,10 +34,11 @@ impl XFlash {
         self.send(&cmd_bytes[..]).await
     }
 
-    pub fn new(conn: Connection, da: DA, dev_info: DeviceInfo) -> Self {
+    pub fn new(conn: Connection, da: DA, dev_info: DeviceInfo, pl: Option<Vec<u8>>) -> Self {
         XFlash {
             conn,
             da,
+            pl,
             dev_info,
             using_exts: false,
             read_packet_length: None,
@@ -131,6 +134,9 @@ impl XFlash {
         status_any!(self, Cmd::SyncSignal as u32);
 
         info!("[Penumbra] Received DA1 sync signal.");
+
+        self.handle_emi().await?;
+
         Ok(true)
     }
 
@@ -182,5 +188,29 @@ impl XFlash {
         debug!("[RX] Data Length from Header: 0x{:X}", len);
 
         Ok(len)
+    }
+
+    async fn handle_emi(&mut self) -> Result<()> {
+        let conn_agent = self.devctrl(Cmd::GetConnectionAgent, None).await?;
+
+        // If the connection agent is "preloader", there's no need to upload EMI settings
+        if conn_agent == b"preloader" {
+            return Ok(());
+        }
+
+        let pl = self
+            .pl
+            .as_ref()
+            .ok_or_else(|| Error::penumbra("Device is in BROM but no preloader was provided!"))?;
+
+        let emi = extract_emi_settings(pl)
+            .ok_or_else(|| Error::penumbra("Failed to extract EMI settings from preloader!"))?;
+
+        info!("[Penumbra] Uploading EMI settings to device...");
+        self.send_cmd(Cmd::InitExtRam).await?;
+        self.send_data(&[&(emi.len() as u32).to_le_bytes(), emi.as_slice()]).await?;
+        info!("[Penumbra] EMI settings uploaded successfully.");
+
+        Ok(())
     }
 }

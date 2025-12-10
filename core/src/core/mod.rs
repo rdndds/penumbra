@@ -4,5 +4,6 @@
 */
 pub mod crypto;
 pub mod devinfo;
+pub mod emi;
 pub mod seccfg;
 pub mod storage;

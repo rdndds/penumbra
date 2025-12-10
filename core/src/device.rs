@@ -42,6 +42,10 @@ pub struct DeviceBuilder {
     /// If not provided, the device will not be able to use DA protocol, and instead
     /// Only preloader commands will be available.
     da_data: Option<Vec<u8>>,
+    /// Preloader data to use for the device. This field is optional.
+    /// If provided, it can be used to extract EMI settings or other information.
+    /// Only needed if told to do so, like when the device is in BROM mode.
+    preloader_data: Option<Vec<u8>>,
 }
 
 impl DeviceBuilder {
@@ -54,6 +58,12 @@ impl DeviceBuilder {
     /// Assigns the DA data to be used for the device.
     pub fn with_da_data(mut self, data: Vec<u8>) -> Self {
         self.da_data = Some(data);
+        self
+    }
+
+    /// Assigns the preloader data to be used for the device.
+    pub fn with_preloader(mut self, data: Vec<u8>) -> Self {
+        self.preloader_data = Some(data);
         self
     }
 
@@ -71,6 +81,7 @@ impl DeviceBuilder {
             protocol: None,
             connected: false,
             da_data: self.da_data,
+            preloader_data: self.preloader_data,
         })
     }
 }
@@ -97,6 +108,8 @@ pub struct Device {
     connected: bool,
     /// Raw DA file data, if provided.
     da_data: Option<Vec<u8>>,
+    /// Preloader data, if provided.
+    preloader_data: Option<Vec<u8>>,
 }
 
 impl Device {
@@ -254,7 +267,9 @@ impl Device {
         })?;
 
         let protocol: Box<dyn DAProtocol + Send> = match da.da_type {
-            DAType::V5 => Box::new(XFlash::new(conn, da, self.dev_info.clone())),
+            DAType::V5 => {
+                Box::new(XFlash::new(conn, da, self.dev_info.clone(), self.preloader_data.clone()))
+            }
             DAType::V6 => Box::new(Xml::new(conn, da, self.dev_info.clone())),
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
