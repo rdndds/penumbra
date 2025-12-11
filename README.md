@@ -104,7 +104,7 @@ Core:
 * [ ] Limit extensions only commands when exts are not added to avoid timeouts
 * [x] Add a way to restore state
 * [x] Clean up duplicated code
-* [ ] Add support for BROM mode (and setup DRAM)
+* [x] Add support for BROM mode (and setup DRAM)
 * [ ] Add support for DA SLA and preloader auth
 * [x] Add target config to Device Info (SBC, DAA and SLA)
 * [x] Improve support for preloader/brom only connection (for testing purposes with just preloader commands)
