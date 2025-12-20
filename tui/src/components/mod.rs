@@ -1,3 +1,4 @@
+pub mod blinking_stars;
 pub mod card_view;
 pub mod description_menu;
 pub mod dialog;
@@ -6,6 +7,7 @@ pub mod progress_bar;
 pub mod selectable_list;
 // Re-exports :D
 
+pub use blinking_stars::Stars;
 pub use card_view::{Card, CardRow};
 pub use description_menu::{DescriptionMenu, DescriptionMenuItem};
 pub use dialog::{DialogBuilder, DialogButton};
