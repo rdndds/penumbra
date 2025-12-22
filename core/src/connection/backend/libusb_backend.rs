@@ -376,4 +376,120 @@ impl MTKPort for UsbMTKPort {
     fn get_port_name(&self) -> String {
         self.port_name.clone()
     }
+
+    async fn find_device() -> Result<Option<Self>> {
+        let devices = tokio::task::spawn_blocking(|| -> Result<Vec<Device<Context>>> {
+            let context = Context::new()
+                .map_err(|e| Error::io(format!("Failed to create USB context: {:?}", e)))?;
+            let devices = context
+                .devices()
+                .map_err(|e| Error::io(format!("Failed to list USB devices: {:?}", e)))?;
+            Ok(devices.iter().collect())
+        })
+        .await
+        .map_err(|_| Error::io("USB find_device task failed"))??;
+
+        for device in devices {
+            let descriptor = match device.device_descriptor() {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+            let vid = descriptor.vendor_id();
+            let pid = descriptor.product_id();
+
+            if KNOWN_PORTS.iter().any(|(kvid, kpid, _)| *kvid == vid && *kpid == pid) {
+                if let Some(port) = UsbMTKPort::from_device(device) {
+                    return Ok(Some(port));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn ctrl_out(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        data: &[u8],
+    ) -> Result<()> {
+        let handle = self.handle.clone();
+        let data = data.to_vec(); // make it owned for blocking closure
+
+        tokio::task::spawn_blocking(move || {
+            let locked = handle.blocking_lock();
+
+            let direction = if request_type & 0x80 != 0 { Direction::In } else { Direction::Out };
+
+            let recipient = match request_type & 0x1F {
+                0 => Recipient::Device,
+                1 => Recipient::Interface,
+                2 => Recipient::Endpoint,
+                _ => Recipient::Other,
+            };
+
+            let request_type_rusb = rusb::request_type(direction, RequestType::Vendor, recipient);
+
+            locked
+                .write_control(
+                    request_type_rusb,
+                    request,
+                    value,
+                    index,
+                    &data,
+                    Duration::from_secs(1),
+                )
+                .map_err(|e| Error::io(format!("Control OUT transfer failed: {:?}", e)))?;
+
+            Ok(())
+        })
+        .await
+        .map_err(|_| Error::io("Failed to run blocking control OUT"))?
+    }
+
+    async fn ctrl_in(
+        &mut self,
+        request_type: u8,
+        request: u8,
+        value: u16,
+        index: u16,
+        len: usize,
+    ) -> Result<Vec<u8>> {
+        let handle = self.handle.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut buf = vec![0u8; len];
+            let locked = handle.blocking_lock();
+
+            let direction = if request_type & 0x80 != 0 { Direction::In } else { Direction::Out };
+
+            let recipient = match request_type & 0x1F {
+                0 => Recipient::Device,
+                1 => Recipient::Interface,
+                2 => Recipient::Endpoint,
+                _ => Recipient::Other,
+            };
+
+            let request_type_rusb = rusb::request_type(direction, RequestType::Vendor, recipient);
+
+            let n = locked
+                .read_control(
+                    request_type_rusb,
+                    request,
+                    value,
+                    index,
+                    &mut buf,
+                    Duration::from_secs(1),
+                )
+                .map_err(|e| Error::io(format!("Control IN transfer failed: {:?}", e)))?;
+
+            buf.truncate(n);
+            Ok(buf)
+        })
+        .await
+        .map_err(|_| Error::io("Failed to run blocking control IN"))?
+    }
 }
