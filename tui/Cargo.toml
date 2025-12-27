@@ -1,11 +1,12 @@
 [package]
 name = "antumbra"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 authors = ["Shomy"]
-license = "AGPL-3.0-or-later"
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 description = "A TUI and CLI for interacting with MediaTek based devices."
-repository = "https://github.com/shomykohai/penumbra"
 
 [dependencies]
 ratatui = "0.29.0"
@@ -35,11 +36,3 @@ unicode-width = "0.2.0"
 [[bin]]
 name = "antumbra"
 path = "src/main.rs"
-
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
-strip = "symbols"
-debug = false

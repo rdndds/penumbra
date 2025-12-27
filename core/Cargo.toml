@@ -1,7 +1,17 @@
 [package]
 name = "penumbra"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+documentation = "https://shomy.is-a.dev/penumbra"
+description = """
+A library for interacting with MediaTek based devices,
+for flashing firmware, readback, bootloader unlocking, and more.
+"""
+keywords = ["MediaTek", "flashing", "bootloader", "android"]
 
 [dependencies]
 aes = "0.8.4"
