@@ -4,4 +4,5 @@
 */
 pub mod arm;
 pub mod patching;
+pub mod rsa;
 pub mod xml;

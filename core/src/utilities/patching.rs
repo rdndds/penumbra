@@ -116,3 +116,17 @@ pub fn patch_ptr(data: &mut [u8], ptr_off: usize, value: u32, base_addr: u32, th
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{:02X}", b)).collect()
 }
+
+pub fn contains_bytes(data: &[u8], pattern: &[u8]) -> usize {
+    if data.is_empty() || pattern.len() > data.len() {
+        return HEX_NOT_FOUND;
+    }
+
+    for (i, window) in data.windows(pattern.len()).enumerate() {
+        if window == pattern {
+            return i;
+        }
+    }
+
+    HEX_NOT_FOUND
+}
