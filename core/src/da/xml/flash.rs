@@ -4,6 +4,7 @@
 */
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::core::storage::is_pl_part;
 use crate::da::Xml;
 use crate::da::xml::cmds::{FileSystemOp, ReadPartition, WritePartition, XmlCmdLifetime};
 use crate::error::Result;
@@ -38,7 +39,11 @@ where
     F: FnMut(usize, usize) + Send,
 {
     xmlcmd!(xml, WritePartition, &part_name, &part_name)?;
-    xml.progress_report().await?;
+    // Progress report is not needed for PL partitions,
+    // because the DA skips the erase process for them.
+    if !is_pl_part(&part_name) {
+        xml.progress_report().await?;
+    }
 
     // Enabled only on DA with security on?
     if xml.dev_info.sbc_enabled().await {
