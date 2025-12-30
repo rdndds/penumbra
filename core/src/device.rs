@@ -339,16 +339,8 @@ impl Device {
             .await
             .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", name)))?;
 
-        let storage = self
-            .dev_info
-            .storage()
-            .await
-            .ok_or_else(|| Error::proto("Failed to get storage information."))?;
-
-        let section = storage.get_user_part();
-
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.read_flash(part.address, part.size, section, progress, writer).await
+        protocol.read_flash(part.address, part.size, part.kind, progress, writer).await
     }
 
     /// Writes data to a specified partition on the device.
@@ -368,16 +360,8 @@ impl Device {
             .await
             .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", name)))?;
 
-        let storage = self
-            .dev_info
-            .storage()
-            .await
-            .ok_or_else(|| Error::proto("Failed to get storage information."))?;
-
-        let section = storage.get_user_part();
-
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.write_flash(part.address, part.size, reader, section, progress).await
+        protocol.write_flash(part.address, part.size, reader, part.kind, progress).await
     }
 
     /// Reads data from a specified offset and size on the device.
