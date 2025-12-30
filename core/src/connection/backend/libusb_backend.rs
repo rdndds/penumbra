@@ -218,7 +218,7 @@ impl MTKPort for UsbMTKPort {
         #[cfg(target_os = "windows")]
         {
             if let Err(_) = self.setup_cdc().await {
-                debug!("Windows CDC Setup failed!!");
+                log::debug!("Windows CDC Setup failed!!");
             }
         }
 
@@ -410,15 +410,6 @@ impl MTKPort for UsbMTKPort {
         spawn_blocking(move || {
             let locked = handle.blocking_lock();
 
-            let direction = if request_type & 0x80 != 0 { Direction::In } else { Direction::Out };
-
-            let recipient = match request_type & 0x1F {
-                0 => Recipient::Device,
-                1 => Recipient::Interface,
-                2 => Recipient::Endpoint,
-                _ => Recipient::Other,
-            };
-
             locked
                 .write_control(request_type, request, value, index, &data, Duration::from_secs(1))
                 .map_err(|e| {
@@ -445,15 +436,6 @@ impl MTKPort for UsbMTKPort {
         spawn_blocking(move || {
             let mut buf = vec![0u8; len];
             let locked = handle.blocking_lock();
-
-            let direction = if request_type & 0x80 != 0 { Direction::In } else { Direction::Out };
-
-            let recipient = match request_type & 0x1F {
-                0 => Recipient::Device,
-                1 => Recipient::Interface,
-                2 => Recipient::Endpoint,
-                _ => Recipient::Other,
-            };
 
             let n = locked
                 .read_control(request_type, request, value, index, &mut buf, Duration::from_secs(1))
