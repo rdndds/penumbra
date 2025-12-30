@@ -2,6 +2,8 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::sync::PoisonError;
+
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
 
@@ -63,6 +65,12 @@ impl From<std::io::Error> for Error {
 impl From<nusb::Error> for Error {
     fn from(err: nusb::Error) -> Self {
         Error::io(err.to_string())
+    }
+}
+
+impl<T> From<PoisonError<T>> for Error {
+    fn from(e: PoisonError<T>) -> Self {
+        Error::penumbra(format!("Lock poisoned: {}", e))
     }
 }
 

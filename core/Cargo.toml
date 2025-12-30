@@ -38,3 +38,4 @@ xmlcmd-derive = { path = "xmlcmd_derive" }
 default = ["nusb"]
 libusb = ["rusb"]
 serial = ["serialport", "tokio-serial"]
+no_localslakeyring = []
