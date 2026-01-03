@@ -169,7 +169,10 @@ impl Xml {
         // perform different actions in between.
         match self.read_ack().await {
             Ok(_) => Ok(true),
-            Err(Error::Xml(err)) if err.kind == XmlErrorKind::UnsupportedCmd => Ok(false),
+            Err(Error::Xml(err)) if err.kind == XmlErrorKind::UnsupportedCmd => {
+                self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+                Ok(false)
+            }
             Err(e) => Err(e),
         }
     }
