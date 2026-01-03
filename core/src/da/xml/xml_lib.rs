@@ -301,7 +301,10 @@ impl Xml {
     }
 
     /// Waits for the device to finish a certain operation, reporting progress.
-    pub(super) async fn progress_report(&mut self) -> Result<bool> {
+    pub(super) async fn progress_report(
+        &mut self,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<bool> {
         let resp = self.read_data().await?;
         let resp_string = String::from_utf8_lossy(&resp);
 
@@ -316,7 +319,26 @@ impl Xml {
         while resp != b"OK!EOT\0" {
             resp = self.read_data().await?;
             self.ack(None).await?;
+
+            let resp_string = String::from_utf8_lossy(&resp);
+
+            if !resp_string.starts_with("OK!PROGRESS@") {
+                continue;
+            }
+
+            let prog = resp_string
+                .trim_end_matches('\0')
+                .split('@')
+                .nth(1)
+                .ok_or_else(|| Error::proto("Invalid progress format"))?;
+
+            let progress_value: usize =
+                prog.parse().map_err(|_| Error::proto("Invalid progress value"))?;
+
+            progress(progress_value, 100);
         }
+
+        progress(100, 100);
 
         Ok(true)
     }
@@ -369,7 +391,8 @@ impl Xml {
         xmlcmd_e!(self, HostSupportedCommands, HOST_CMDS)?;
         // Wait for the device to initialize DRAM
         xmlcmd!(self, NotifyInitHw)?;
-        self.progress_report().await?;
+        let mut mock_progress = |_, _| {};
+        self.progress_report(&mut mock_progress).await?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
 
         Ok(true)
