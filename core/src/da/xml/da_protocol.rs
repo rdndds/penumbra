@@ -149,6 +149,16 @@ impl DAProtocol for Xml {
         todo!()
     }
 
+    async fn erase_flash(
+        &mut self,
+        addr: u64,
+        size: usize,
+        section: PartitionKind,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        todo!()
+    }
+
     async fn download(
         &mut self,
         part_name: String,
@@ -166,6 +176,14 @@ impl DAProtocol for Xml {
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         flash::upload(self, part_name, reader, progress).await
+    }
+
+    async fn format(
+        &mut self,
+        part_name: String,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        flash::format(self, part_name, progress).await
     }
 
     async fn read32(&mut self, _addr: u32) -> Result<u32> {

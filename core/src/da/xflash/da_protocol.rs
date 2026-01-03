@@ -200,6 +200,16 @@ impl DAProtocol for XFlash {
         flash::write_flash(self, addr, size, reader, section, progress).await
     }
 
+    async fn erase_flash(
+        &mut self,
+        addr: u64,
+        size: usize,
+        section: PartitionKind,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        flash::erase_flash(self, addr, size, section, progress).await
+    }
+
     async fn download(
         &mut self,
         part_name: String,
@@ -217,6 +227,14 @@ impl DAProtocol for XFlash {
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         flash::upload(self, part_name, writer, progress).await
+    }
+
+    async fn format(
+        &mut self,
+        part_name: String,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        flash::format(self, part_name, progress).await
     }
 
     async fn get_usb_speed(&mut self) -> Result<u32> {

@@ -116,6 +116,12 @@ pub struct WritePartition {
     source_file: String,
 }
 
+#[derive(XmlCommand)]
+pub struct ErasePartition {
+    #[xml(tag = "partition")]
+    partition: String,
+}
+
 pub fn create_cmd<C: XmlCommand>(cmd: &C) -> String {
     let mut xml = format!(
         r#"<?xml version="1.0" encoding="utf-8"?><da><version>{}</version><command>CMD:{}</command>"#,

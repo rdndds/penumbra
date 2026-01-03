@@ -42,6 +42,14 @@ pub trait DAProtocol: Send {
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()>;
 
+    async fn erase_flash(
+        &mut self,
+        addr: u64,
+        size: usize,
+        section: PartitionKind,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()>;
+
     async fn download(
         &mut self,
         part_name: String,
@@ -54,6 +62,12 @@ pub trait DAProtocol: Send {
         &mut self,
         part_name: String,
         reader: &mut (dyn AsyncWrite + Unpin + Send),
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()>;
+
+    async fn format(
+        &mut self,
+        part_name: String,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()>;
 

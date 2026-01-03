@@ -364,6 +364,23 @@ impl Device {
         protocol.write_flash(part.address, part.size, reader, part.kind, progress).await
     }
 
+    pub async fn erase_partition(
+        &mut self,
+        partition: &str,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        self.ensure_da_mode().await?;
+
+        let part = self
+            .dev_info
+            .get_partition(partition)
+            .await
+            .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", partition)))?;
+
+        let protocol = self.protocol.as_mut().unwrap();
+        protocol.erase_flash(part.address, part.size, part.kind, progress).await
+    }
+
     /// Reads data from a specified offset and size on the device.
     /// This allows reading from arbitrary locations, not limited to named partitions.
     /// To specify the section (e.g., user, pl_part1, pl_part2), provide the appropriate
@@ -439,6 +456,19 @@ impl Device {
         protocol.write_flash(address, size, reader, section, progress).await
     }
 
+    pub async fn erase_offset(
+        &mut self,
+        address: u64,
+        size: usize,
+        section: PartitionKind,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        self.ensure_da_mode().await?;
+
+        let protocol = self.protocol.as_mut().unwrap();
+        protocol.erase_flash(address, size, section, progress).await
+    }
+
     /// Like `write_partition`, but instead of writing using offsets and sizes from GPT,
     /// it uses the partition name directly.
     ///
@@ -504,6 +534,17 @@ impl Device {
 
         let protocol = self.protocol.as_mut().unwrap();
         protocol.upload(partition.to_string(), writer, progress).await
+    }
+
+    pub async fn format(
+        &mut self,
+        partition: &str,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        self.ensure_da_mode().await?;
+
+        let protocol = self.protocol.as_mut().unwrap();
+        protocol.format(partition.to_string(), progress).await
     }
 
     pub async fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<Vec<u8>> {

@@ -4,9 +4,15 @@
 */
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::core::storage::is_pl_part;
+use crate::core::storage::{PartitionKind, is_pl_part};
 use crate::da::Xml;
-use crate::da::xml::cmds::{FileSystemOp, ReadPartition, WritePartition, XmlCmdLifetime};
+use crate::da::xml::cmds::{
+    ErasePartition,
+    FileSystemOp,
+    ReadPartition,
+    WritePartition,
+    XmlCmdLifetime,
+};
 use crate::error::Result;
 
 pub async fn upload<F, W>(
@@ -42,7 +48,8 @@ where
     // Progress report is not needed for PL partitions,
     // because the DA skips the erase process for them.
     if !is_pl_part(&part_name) {
-        xml.progress_report().await?;
+        let mut mock_progress = |_: usize, _: usize| {};
+        xml.progress_report(&mut mock_progress).await?;
     }
 
     // Enabled only on DA with security on?
@@ -55,4 +62,26 @@ where
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
 
     Ok(())
+}
+
+pub async fn format<F>(xml: &mut Xml, part_name: String, mut progress: F) -> Result<()>
+where
+    F: FnMut(usize, usize) + Send,
+{
+    xmlcmd!(xml, ErasePartition, &part_name)?;
+    xml.progress_report(&mut progress).await?;
+
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+
+    Ok(())
+}
+
+pub async fn erase_flash<F>(
+    xml: &mut Xml,
+    addr: u64,
+    size: usize,
+    section: PartitionKind,
+    progress: &mut (dyn FnMut(usize, usize) + Send),
+) -> Result<()> {
+    todo!()
 }

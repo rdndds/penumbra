@@ -170,6 +170,57 @@ where
     Ok(())
 }
 
+pub async fn erase_flash<F>(
+    xflash: &mut XFlash,
+    addr: u64,
+    size: usize,
+    section: PartitionKind,
+    mut progress: F,
+) -> Result<()>
+where
+    F: FnMut(usize, usize),
+{
+    info!("Erasing flash at address {:#X} with size {:#X}", addr, size);
+    let storage_type = xflash.get_storage_type().await as u32;
+
+    let partition_type = section.as_u32();
+    let nand_ext = [0u32; 8];
+    let mut param = Vec::new();
+    param.extend_from_slice(&storage_type.to_le_bytes());
+    param.extend_from_slice(&partition_type.to_le_bytes());
+    param.extend_from_slice(&addr.to_le_bytes());
+    param.extend_from_slice(&(size as u64).to_le_bytes());
+    param.extend_from_slice(&nand_ext.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+
+    xflash.send_cmd(Cmd::Format).await?;
+    xflash.send(&param).await?;
+
+    progress(0, size);
+    let mut status = vec![0u8; 4];
+    loop {
+        status = xflash.read_data().await?;
+        if u32::from_le_bytes(status.try_into().unwrap()) == 0x40040005 {
+            progress(size, size);
+            break;
+        }
+
+        status = xflash.read_data().await?;
+        let progress_percent = u32::from_le_bytes(status.try_into().unwrap());
+        let ack = [0u8; 4];
+        // The device doesn't send statuses during erase, so we have to send
+        // an acknowledgment manually through the port and not through send()
+        let hdr = xflash.generate_header(&ack);
+        xflash.conn.port.write_all(&hdr).await?;
+        xflash.conn.port.write_all(&ack).await?;
+
+        let progress_bytes = (progress_percent as usize * size) / 100;
+        progress(progress_bytes, size);
+    }
+
+    info!("Flash erase completed.");
+    Ok(())
+}
+
 pub async fn download<F, R>(
     xflash: &mut XFlash,
     part_name: String,
@@ -272,6 +323,56 @@ where
     }
     info!("Upload completed, 0x{:X} bytes received.", size);
 
+    Ok(())
+}
+
+pub async fn format<F>(xflash: &mut XFlash, part_name: String, mut progress: F) -> Result<()>
+where
+    F: FnMut(usize, usize),
+{
+    let part = match xflash.dev_info.get_partition(&part_name).await {
+        Some(p) => p,
+        None => {
+            return Err(Error::proto(&format!(
+                "Partition '{}' not found in partition table",
+                part_name
+            )));
+        }
+    };
+
+    xflash.send_cmd(Cmd::FormatPartition).await?;
+    // The device starts sending statuses right after sending the partition name,
+    // because MTK forgot to put a status write after the command :/
+    // so we have to send it manually through the port and not through send()
+    let hdr = xflash.generate_header(part_name.as_bytes());
+    xflash.conn.port.write_all(&hdr).await?;
+    xflash.conn.port.write_all(part_name.as_bytes()).await?;
+
+    info!("Formatting partition '{}'", part_name);
+
+    progress(0, part.size);
+    let mut status = vec![0u8; 4];
+    loop {
+        status = xflash.read_data().await?;
+        if u32::from_le_bytes(status.try_into().unwrap()) == 0x40040005 {
+            progress(part.size, part.size);
+            break;
+        }
+
+        status = xflash.read_data().await?;
+        let progress_percent = u32::from_le_bytes(status.try_into().unwrap());
+        let ack = [0u8; 4];
+        // The device doesn't send statuses during erase, so we have to send
+        // an acknowledgment manually through the port and not through send()
+        let hdr = xflash.generate_header(&ack);
+        xflash.conn.port.write_all(&hdr).await?;
+        xflash.conn.port.write_all(&ack).await?;
+
+        let progress_bytes = (progress_percent as usize * part.size) / 100;
+        progress(progress_bytes, part.size);
+    }
+
+    info!("Partition '{}' formatted.", part_name);
     Ok(())
 }
 
