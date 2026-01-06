@@ -160,7 +160,7 @@ impl DAProtocol for Xml {
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        todo!()
+        flash::erase_flash(self, addr, size, section, progress).await
     }
 
     async fn download(

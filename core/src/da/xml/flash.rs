@@ -77,11 +77,14 @@ where
 }
 
 pub async fn erase_flash<F>(
-    xml: &mut Xml,
-    addr: u64,
-    size: usize,
-    section: PartitionKind,
-    progress: &mut (dyn FnMut(usize, usize) + Send),
-) -> Result<()> {
+    _xml: &mut Xml,
+    _addr: u64,
+    _size: usize,
+    _section: PartitionKind,
+    mut _progress: F,
+) -> Result<()>
+where
+    F: FnMut(usize, usize) + Send,
+{
     todo!()
 }
