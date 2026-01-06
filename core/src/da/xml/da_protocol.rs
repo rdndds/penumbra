@@ -24,6 +24,7 @@ use crate::da::xml::cmds::{
     XmlCmdLifetime,
 };
 use crate::da::xml::flash;
+use crate::da::xml::{exts, flash, patch};
 use crate::da::{DA, DAEntryRegion, Xml};
 use crate::error::{Error, Result};
 use crate::exploit::Exploit;
@@ -79,6 +80,8 @@ impl DAProtocol for Xml {
         self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
 
         info!("Successfully uploaded and booted to XML DA2");
+
+        self.boot_extensions().await?;
 
         Ok(true)
     }
