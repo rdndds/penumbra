@@ -53,6 +53,19 @@ pub fn encode_bl(src: u32, dst: u32) -> Vec<u8> {
     vec![hi_bytes[0], hi_bytes[1], lo_bytes[0], lo_bytes[1]]
 }
 
+pub fn encode_bl_arm(src: u32, dst: u32) -> Result<u32> {
+    let off = dst as i64 - (src as i64 + 8);
+
+    if !(-(1 << 25)..=((1 << 25) - 4)).contains(&off) {
+        return Err(Error::penumbra("BL target out of range"));
+    }
+
+    let imm24 = (off >> 2) as u32 & 0x00FF_FFFF;
+    let instr = 0xEB00_0000u32 | imm24;
+
+    Ok(instr)
+}
+
 pub fn encode_ldr(
     dest_reg: u16,
     instr_offset: usize,
@@ -78,4 +91,23 @@ pub fn encode_ldr(
     // A minimal ldr instruction is 0x4800
     let instruction = 0x4800u16 | dest_reg << 8 | imm8 as u16;
     Ok(instruction.to_le_bytes())
+}
+
+pub fn force_return(data: &mut [u8], off: usize, value: u32, thumb_mode: bool) -> Result<()> {
+    if thumb_mode {
+        let mov_r0 = 0x2000u16 | ((value & 0xFF) as u16);
+        let bx_lr = 0x4770u16;
+
+        data[off..off + 2].copy_from_slice(&mov_r0.to_le_bytes());
+        data[off + 2..off + 4].copy_from_slice(&bx_lr.to_le_bytes());
+        return Ok(());
+    }
+
+    let mov_r0 = 0xE3A00000u32 | (value & 0xFF) | ((value << 4) & 0xF00);
+    let bx_lr = 0xE12FFF1Eu32;
+
+    data[off..off + 4].copy_from_slice(&mov_r0.to_le_bytes());
+    data[off + 4..off + 8].copy_from_slice(&bx_lr.to_le_bytes());
+
+    Ok(())
 }
