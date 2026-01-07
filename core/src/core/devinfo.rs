@@ -76,7 +76,7 @@ impl DeviceInfo {
 
     pub async fn get_partition(&self, name: &str) -> Option<Partition> {
         let partitions = self.inner().read().await.partitions.clone();
-        partitions.into_iter().find(|p| p.name == name)
+        partitions.into_iter().find(|p| p.name.eq_ignore_ascii_case(name))
     }
 
     pub async fn set_partitions(&self, partitions: Vec<Partition>) {
