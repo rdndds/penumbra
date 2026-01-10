@@ -385,6 +385,65 @@ where
     Ok(())
 }
 
+pub async fn set_rsc_info<F, R>(
+    xflash: &mut XFlash,
+    part_name: &str,
+    size: usize,
+    mut reader: R,
+    mut progress: F,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin,
+    F: FnMut(usize, usize),
+{
+    // Split in chunks of 256 bytes
+    // The payload structure is like this:
+    // u64 offset LE (each iteration, it increases by 1)
+    // 64 bytes partition name (null-terminated)
+    // 256 bytes (data)
+
+    let mut offset = 0u64;
+    let mut buffer = vec![0u8; 256];
+
+    loop {
+        let mut payload = Vec::new();
+        // First byte is 0
+        payload.push(0x00);
+
+        let offset_bytes = offset.to_le_bytes();
+        payload.extend_from_slice(&offset_bytes[..7]);
+
+        let mut part_name_bytes = vec![0u8; 64];
+        let name_bytes = part_name.as_bytes();
+        let name_len = name_bytes.len().min(63);
+        part_name_bytes[..name_len].copy_from_slice(&name_bytes[..name_len]);
+        payload.extend_from_slice(&part_name_bytes);
+
+        let bytes_read = reader.read(&mut buffer).await?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let chunk = if bytes_read < 256 {
+            let mut chunk_buf = vec![0u8; 256];
+            chunk_buf[..bytes_read].copy_from_slice(&buffer[..bytes_read]);
+            chunk_buf
+        } else {
+            buffer[..].to_vec()
+        };
+
+        payload.extend_from_slice(&chunk);
+        assert_eq!(payload.len(), 328);
+
+        xflash.devctrl(Cmd::SetRscInfo, Some(&[&payload])).await?;
+
+        progress(offset as usize * 256 + bytes_read, size);
+        offset += 1;
+    }
+
+    Ok(())
+}
+
 pub async fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
     let packet_length = xflash.devctrl(Cmd::GetPacketLength, None).await?;
 
