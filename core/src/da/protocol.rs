@@ -4,6 +4,7 @@
 */
 use std::sync::Arc;
 
+use downcast_rs::{DowncastSend, impl_downcast};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::connection::Connection;
@@ -35,7 +36,7 @@ impl BootMode {
 }
 
 #[async_trait::async_trait]
-pub trait DAProtocol: Send {
+pub trait DAProtocol: DowncastSend {
     // Main helpers
     async fn upload_da(&mut self) -> Result<bool>;
     async fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool>;
@@ -133,3 +134,5 @@ pub trait DAProtocol: Send {
     // DevInfo helpers
     fn get_devinfo(&self) -> &DeviceInfo;
 }
+
+impl_downcast!(DAProtocol);

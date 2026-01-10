@@ -239,7 +239,7 @@ impl Device {
     }
 
     /// Internal helper to ensure the device enters DA mode before performing DA operations.
-    async fn ensure_da_mode(&mut self) -> Result<&mut Box<dyn DAProtocol + Send>> {
+    async fn ensure_da_mode(&mut self) -> Result<&mut (dyn DAProtocol + Send)> {
         if !self.connected {
             return Err(Error::conn("Device is not connected. Call init() first."));
         }
@@ -300,8 +300,8 @@ impl Device {
 
     /// Gets a mutable reference to the DA protocol handler, if available.
     /// Returns `None` if the device is not in DA mode.
-    pub fn get_protocol(&mut self) -> Option<&mut Box<dyn DAProtocol + Send>> {
-        self.protocol.as_mut()
+    pub fn get_protocol(&mut self) -> Option<&mut (dyn DAProtocol + Send)> {
+        self.protocol.as_deref_mut()
     }
 
     pub async fn get_partitions(&mut self) -> Vec<Partition> {
