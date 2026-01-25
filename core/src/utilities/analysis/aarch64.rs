@@ -1,3 +1,8 @@
+/*
+    SPDX-License-Identifier: AGPL-3.0-or-later
+    SPDX-FileCopyrightText: 2025 Shomy
+*/
+
 use super::ArchAnalyzer;
 
 pub struct Aarch64Analyzer {
@@ -10,31 +15,28 @@ impl Aarch64Analyzer {
         Self { data, base_addr }
     }
 
-    fn read_u32(&self, offset: usize) -> Option<u32> {
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    pub fn read_u32(&self, offset: usize) -> Option<u32> {
         self.data.get(offset..offset + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
-    fn offset_to_va(&self, offset: usize) -> u64 {
-        self.base_addr + offset as u64
-    }
-
     /// Decodes ADRP instruction.
+    ///
     /// ADRP Encoding:
     /// * OPCode: 0x90000000
-    /// * Rd = destination register
+    /// * Rd = destination register (bits [4:0])
     /// * immlo = bits [30:29]
     /// * immhi = bits [23:5]
     ///
-    /// Example:
-    /// 40003260 22 00 00 90     adrp       x2,0x40007000
-    /// Rd = 0x90000022 & 0x1F = 2 (x2)
-    /// immlo = (0x90000022 >> 29) & 0x3 = 0
-    /// immhi = (0x90000022 >> 5) & 0x7FFFF = 0x7000 >> 2 = 0x1C00
-    /// immediate = (immhi << 2) | immlo = (0x1C00 << 2) | 0 = 0x7000
-    /// page address = (PC & ~0xFFF) + (immediate << 12) = (0x40003260 & ~0xFFF) + (0x7000 << 12) =
-    /// 0x40007000
-    ///  Returns the pa
-    fn decode_adrp(&self, instr: u32, pc: u64) -> Option<(u64, u8)> {
+    /// Returns (page_address, destination_register)
+    pub fn decode_adrp(&self, instr: u32, pc: u64) -> Option<(u64, u8)> {
         if (instr & 0x9F000000) != 0x90000000 {
             return None;
         }
@@ -52,7 +54,12 @@ impl Aarch64Analyzer {
         Some((page.wrapping_add((imm << 12) as u64), rd))
     }
 
-    fn decode_add_imm(&self, instr: u32) -> Option<(u8, u8, u32)> {
+    /// Decodes ADD immediate instruction (64-bit).
+    ///
+    /// Encoding: 0x91000000 | (shift << 22) | (imm12 << 10) | (Rn << 5) | Rd
+    ///
+    /// Returns (source_register, destination_register, immediate_value)
+    pub fn decode_add_imm(&self, instr: u32) -> Option<(u8, u8, u32)> {
         if (instr & 0xFF000000) != 0x91000000 {
             return None;
         }
@@ -67,8 +74,13 @@ impl Aarch64Analyzer {
         Some((rn, rd, imm))
     }
 
+    /// Decodes BL instruction.
+    ///
+    /// Returns the target address.
     fn decode_bl(&self, instr: u32, pc: u64) -> Option<u64> {
-        if (instr & 0xFC000000) != 0x94000000 {
+        let opcode = instr & 0xFC000000;
+
+        if opcode != 0x94000000 && opcode != 0x14000000 {
             return None;
         }
 
@@ -80,6 +92,9 @@ impl Aarch64Analyzer {
         Some(pc.wrapping_add((off * 4) as u64))
     }
 
+    /// Decodes MOV register instruction (ORR with XZR).
+    ///
+    /// Returns (source_register, destination_register)
     fn decode_mov_register(&self, instr: u32) -> Option<(u8, u8)> {
         if (instr & 0xFFE0FFE0) != 0xAA0003E0 {
             return None;
@@ -100,12 +115,12 @@ impl Aarch64Analyzer {
 
     fn find_string_xref_inner(&self, s: &str) -> Option<usize> {
         let off = self.find_string(s)?;
-        let va = self.offset_to_va(off);
+        let va = self.base_addr + off as u64;
         let page = va & !0xFFF;
 
         for off in (0..self.data.len()).step_by(4) {
             let instr = self.read_u32(off)?;
-            let pc = self.offset_to_va(off);
+            let pc = self.base_addr + off as u64;
 
             let (adrp_page, reg) = match self.decode_adrp(instr, pc) {
                 Some(v) => v,
@@ -158,7 +173,7 @@ impl Aarch64Analyzer {
                     return Some(off - 4);
                 }
 
-                // Sub SP before STP →
+                // Sub SP before STP
                 if (prev & 0xFFC003FF) == 0xD10003FF
                     && (instr & MASK_FALLBACK) == (PATTERN_FALLBACK & MASK_FALLBACK)
                 {
@@ -174,21 +189,7 @@ impl Aarch64Analyzer {
         None
     }
 
-    /// Resolves the value of a register at a given offset by scanning backwards
-    /// Example:
-    ///
-    /// adrp       x0,0x40045000
-    /// adrp       x2,0x40006000
-    /// add        x0=>s_CMD:SET-RSC_40045a3e,x0,#0xa3e             = "CMD:SET-RSC"
-    /// add        x2=>FUN_40006d10,x2,#0xd10
-    /// mov        x1=>s_1_40047869+24,x19                          = "1"
-    /// bl         FUN_40009814                                     undefined FUN_40009814()
-    /// At the BL instruction, resolve_register_value with target_reg=0 would return 0x40045a3e
-    /// and with target_reg=1 would return 0x40047881, and finally with target_reg=2 would return
-    /// 0x40006d10
-    ///
-    /// The matching C code:
-    /// register_major_command("CMD:SET-RSC", "1", cmd_set_rsc);
+    /// Resolves the value of a register at a given offset by scanning backwards.
     fn resolve_register_value(&self, at: usize, reg: u8, lookback: usize) -> Option<u64> {
         let start = at.saturating_sub(lookback * 4);
         let mut cur_reg = reg;
@@ -197,22 +198,20 @@ impl Aarch64Analyzer {
             let instr = self.read_u32(off)?;
 
             if let Some((rn, rd, imm)) = self.decode_add_imm(instr)
-                && rd == cur_reg
-            {
-                return self.resolve_adrp_part(off, start, rn, imm);
-            }
+                && rd == cur_reg {
+                    return self.resolve_adrp_part(off, start, rn, imm);
+                }
 
             if let Some((rm, rd)) = self.decode_mov_register(instr)
-                && rd == cur_reg
-            {
-                cur_reg = rm;
-            }
+                && rd == cur_reg {
+                    cur_reg = rm;
+                }
         }
 
         None
     }
 
-    /// Resolves the ADRP part of an ADD instruction by scanning backwards for the matching ADRP
+    /// Resolves the ADRP part of an ADD instruction by scanning backwards.
     fn resolve_adrp_part(&self, from: usize, limit: usize, reg: u8, imm: u32) -> Option<u64> {
         if from < limit {
             return None;
@@ -222,13 +221,12 @@ impl Aarch64Analyzer {
 
         loop {
             let instr = self.read_u32(off)?;
-            let pc = self.offset_to_va(off);
+            let pc = self.base_addr + off as u64;
 
             if let Some((page, rd)) = self.decode_adrp(instr, pc)
-                && rd == reg
-            {
-                return Some(page + imm as u64);
-            }
+                && rd == reg {
+                    return Some(page + imm as u64);
+                }
 
             if off <= limit || off < 4 {
                 break;
@@ -271,13 +269,28 @@ impl ArchAnalyzer for Aarch64Analyzer {
 
     fn get_bl_target(&self, offset: usize) -> Option<u64> {
         let instr = self.read_u32(offset)?;
-        self.decode_bl(instr, self.offset_to_va(offset))
+        let pc = self.offset_to_va(offset)?;
+        self.decode_bl(instr, pc)
+    }
+
+    fn get_b_target(&self, offset: usize) -> Option<u64> {
+        self.get_bl_target(offset)
     }
 
     fn get_next_bl_from_off(&self, offset: usize) -> Option<usize> {
         for off in (offset..self.data.len()).step_by(4) {
             let instr = self.read_u32(off)?;
             if (instr & 0xFC000000) == 0x94000000 {
+                return Some(off);
+            }
+        }
+        None
+    }
+
+    fn get_next_b_from_off(&self, offset: usize) -> Option<usize> {
+        for off in (offset..self.data.len()).step_by(4) {
+            let instr = self.read_u32(off)?;
+            if (instr & 0xFC000000) == 0x14000000 {
                 return Some(off);
             }
         }

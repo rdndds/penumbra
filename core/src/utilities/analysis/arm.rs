@@ -1,3 +1,8 @@
+/*
+    SPDX-License-Identifier: AGPL-3.0-or-later
+    SPDX-FileCopyrightText: 2025 Shomy
+*/
+
 use super::ArchAnalyzer;
 
 pub struct ArmAnalyzer {
@@ -10,7 +15,15 @@ impl ArmAnalyzer {
         Self { data, base_addr }
     }
 
-    fn read_u32(&self, offset: usize) -> Option<u32> {
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
+    pub fn read_u32(&self, offset: usize) -> Option<u32> {
         if offset + 4 > self.data.len() {
             return None;
         }
@@ -22,8 +35,60 @@ impl ArmAnalyzer {
         ]))
     }
 
-    fn offset_to_va(&self, offset: usize) -> u64 {
-        self.base_addr + offset as u64
+    /// Decodes MOVW instruction.
+    /// Returns (register, imm16)
+    pub fn decode_movw(&self, instr: u32) -> Option<(u8, u32)> {
+        // MOVW: cond 0011 0000 imm4 Rd imm12
+        // Encoding: 0xE30xxxxx
+        if (instr & 0x0FF00000) != 0x03000000 {
+            return None;
+        }
+
+        let rd = ((instr >> 12) & 0xF) as u8;
+        let imm4 = (instr >> 16) & 0xF;
+        let imm12 = instr & 0xFFF;
+        let imm16 = (imm4 << 12) | imm12;
+
+        Some((rd, imm16))
+    }
+
+    /// Decodes MOVT instruction.
+    /// Returns (register, imm16)
+    pub fn decode_movt(&self, instr: u32) -> Option<(u8, u32)> {
+        // MOVT: cond 0011 0100 imm4 Rd imm12
+        // Encoding: 0xE34xxxxx
+        if (instr & 0x0FF00000) != 0x03400000 {
+            return None;
+        }
+
+        let rd = ((instr >> 12) & 0xF) as u8;
+        let imm4 = (instr >> 16) & 0xF;
+        let imm12 = instr & 0xFFF;
+        let imm16 = (imm4 << 12) | imm12;
+
+        Some((rd, imm16))
+    }
+
+    /// Decodes SUB register instruction.
+    /// SUB Rd, Rn, Rm
+    /// Returns (Rn, Rm, Rd)
+    pub fn decode_sub_reg(&self, instr: u32) -> Option<(u8, u8, u8)> {
+        // SUB (register): cond 0000 010S nnnn dddd 0000 0000 mmmm
+        if (instr & 0x0FE00FF0) != 0x00400000 {
+            return None;
+        }
+
+        let rn = ((instr >> 16) & 0xF) as u8;
+        let rd = ((instr >> 12) & 0xF) as u8;
+        let rm = (instr & 0xF) as u8;
+
+        Some((rn, rm, rd))
+    }
+
+    /// Checks if instruction is BX LR (return)
+    pub fn is_bx_lr(&self, instr: u32) -> bool {
+        // BX LR: 0xE12FFF1E
+        (instr & 0x0FFFFFFF) == 0x012FFF1E
     }
 
     fn decode_ldr_pc(&self, instr: u32, pc: u64) -> Option<(u8, u64)> {
@@ -46,7 +111,9 @@ impl ArmAnalyzer {
     }
 
     fn decode_bl(&self, instr: u32, pc: u64) -> Option<u64> {
-        if (instr & 0x0F000000) != 0x0B000000 {
+        let opcode = instr & 0x0F000000;
+
+        if opcode != 0x0A000000 && opcode != 0x0B000000 {
             return None;
         }
 
@@ -69,6 +136,7 @@ impl ArmAnalyzer {
     }
 
     fn is_prologue(&self, instr: u32) -> bool {
+        // PUSH with LR: STMDB SP!, {..., LR}
         if (instr & 0xFFFF0000) == 0xE92D0000 && (instr & (1 << 14)) != 0 {
             return true;
         }
@@ -90,7 +158,7 @@ impl ArmAnalyzer {
 
     fn find_string_xref_inner(&self, target_str: &str) -> Option<usize> {
         let str_off = self.find_string(target_str)?;
-        let str_va = self.offset_to_va(str_off) as u32;
+        let str_va = (self.base_addr + str_off as u64) as u32;
 
         let low16 = (str_va & 0xFFFF) as u16;
         let high16 = (str_va >> 16) as u16;
@@ -100,7 +168,7 @@ impl ArmAnalyzer {
         for offset in (0..len.saturating_sub(8)).step_by(4) {
             let instr1 = self.read_u32(offset)?;
 
-            if !self.is_movw(instr1, low16) {
+            if !self.is_movw_imm(instr1, low16) {
                 continue;
             }
 
@@ -110,7 +178,7 @@ impl ArmAnalyzer {
             for lookahead_offset in (offset + 4..end).step_by(4) {
                 let instr2 = self.read_u32(lookahead_offset)?;
 
-                if self.is_movt(instr2, high16) && self.get_movt_reg(instr2) == reg {
+                if self.is_movt_imm(instr2, high16) && self.get_movt_reg(instr2) == reg {
                     return Some(offset);
                 }
             }
@@ -118,20 +186,19 @@ impl ArmAnalyzer {
 
         for offset in (0..len.saturating_sub(4)).step_by(4) {
             let instr = self.read_u32(offset)?;
-            let pc = self.offset_to_va(offset);
+            let pc = self.base_addr + offset as u64;
 
             if let Some((_, addr)) = self.decode_ldr_pc(instr, pc)
-                && addr == str_va as u64
-            {
-                return Some(offset);
-            }
+                && addr == str_va as u64 {
+                    return Some(offset);
+                }
         }
 
         None
     }
 
-    fn is_movw(&self, instr: u32, imm16: u16) -> bool {
-        if (instr & 0xFFF00000) != 0xE3000000 {
+    fn is_movw_imm(&self, instr: u32, imm16: u16) -> bool {
+        if (instr & 0x0FF00000) != 0x03000000 {
             return false;
         }
 
@@ -142,8 +209,8 @@ impl ArmAnalyzer {
         decoded_imm16 == imm16 as u32
     }
 
-    fn is_movt(&self, instr: u32, imm16: u16) -> bool {
-        if (instr & 0xFFF00000) != 0xE3400000 {
+    fn is_movt_imm(&self, instr: u32, imm16: u16) -> bool {
+        if (instr & 0x0FF00000) != 0x03400000 {
             return false;
         }
 
@@ -164,16 +231,14 @@ impl ArmAnalyzer {
 
     fn find_function_start(&self, from_offset: usize) -> Option<usize> {
         const LIMIT: usize = 0x2000;
-        let start = from_offset;
-        let end = start.saturating_sub(LIMIT);
-        let mut current = start;
+        let end = from_offset.saturating_sub(LIMIT);
+        let mut current = from_offset;
 
         while current >= end && current > 0 {
             if let Some(instr) = self.read_u32(current)
-                && self.is_prologue(instr)
-            {
-                return Some(current);
-            }
+                && self.is_prologue(instr) {
+                    return Some(current);
+                }
 
             if current < 4 {
                 break;
@@ -196,7 +261,7 @@ impl ArmAnalyzer {
         while off >= start {
             let instr = self.read_u32(off)?;
 
-            let pc = self.offset_to_va(off);
+            let pc = self.base_addr + off as u64;
             if let Some((rd, addr)) = self.decode_ldr_pc(instr, pc)
                 && rd == reg
             {
@@ -205,10 +270,9 @@ impl ArmAnalyzer {
             }
 
             if let Some((rm, rd)) = self.decode_mov(instr)
-                && rd == reg
-            {
-                reg = rm;
-            }
+                && rd == reg {
+                    reg = rm;
+                }
 
             if off < 4 {
                 break;
@@ -261,8 +325,12 @@ impl ArchAnalyzer for ArmAnalyzer {
 
     fn get_bl_target(&self, offset: usize) -> Option<u64> {
         let instr = self.read_u32(offset)?;
-        let pc = self.offset_to_va(offset);
+        let pc = self.offset_to_va(offset)?;
         self.decode_bl(instr, pc)
+    }
+
+    fn get_b_target(&self, offset: usize) -> Option<u64> {
+        self.get_bl_target(offset)
     }
 
     fn get_next_bl_from_off(&self, offset: usize) -> Option<usize> {
@@ -270,6 +338,30 @@ impl ArchAnalyzer for ArmAnalyzer {
 
         for off in (offset..len).step_by(4) {
             let instr = self.read_u32(off)?;
+
+            let opcode = instr & 0x0F000000;
+            if opcode != 0x0B000000 {
+                continue;
+            }
+
+            if self.decode_bl(instr, 0).is_some() {
+                return Some(off);
+            }
+        }
+
+        None
+    }
+
+    fn get_next_b_from_off(&self, offset: usize) -> Option<usize> {
+        let len = self.data.len();
+
+        for off in (offset..len).step_by(4) {
+            let instr = self.read_u32(off)?;
+
+            let opcode = instr & 0x0F000000;
+            if opcode != 0x0A000000 {
+                continue;
+            }
 
             if self.decode_bl(instr, 0).is_some() {
                 return Some(off);
