@@ -224,7 +224,6 @@ impl DA {
         if self.regions.len() >= 3 { Some(&self.regions[2]) } else { None }
     }
 
-    // TODO: Consider making this part of da.rs instead, as kamakiri requires it as well
     pub fn find_da_hash_offset(&self) -> Option<usize> {
         match self.da_type {
             // V5 hashes are easily found 0x30 bytes before the "MMU MAP: VA" string in the DA1
@@ -266,5 +265,13 @@ impl DA {
             }
             _ => None,
         }
+    }
+
+    pub fn is_arm64(&self) -> bool {
+        if let Some(da2) = self.get_da2() {
+            return da2.data.len() > 4 && da2.data[0..4] == [0xC6, 0x01, 0x00, 0x58];
+        }
+
+        false
     }
 }
