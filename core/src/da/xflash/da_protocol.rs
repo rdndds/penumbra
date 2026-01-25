@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use log::{debug, error, info};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
 
 use crate::connection::Connection;
@@ -26,29 +25,14 @@ use crate::da::xflash::patch;
 use crate::da::xflash::sec::{parse_seccfg, write_seccfg};
 use crate::da::{DA, DAEntryRegion, DAProtocol, XFlash};
 use crate::error::{Error, Result, XFlashError};
+use crate::exploit;
 #[cfg(not(feature = "no_exploits"))]
-use crate::exploit::Exploit;
-#[cfg(not(feature = "no_exploits"))]
-use crate::exploit::carbonara::Carbonara;
-#[cfg(not(feature = "no_exploits"))]
-use crate::exploit::kamakiri::Kamakiri2;
+use crate::exploit::{Carbonara, Exploit, Kamakiri};
 
 #[async_trait::async_trait]
 impl DAProtocol for XFlash {
     async fn upload_da(&mut self) -> Result<bool> {
-        #[cfg(not(feature = "no_exploits"))]
-        {
-            if self.patch {
-                let mutex_da = Arc::new(Mutex::new(self.da.clone()));
-                let mut kamakiri = Kamakiri2::new(mutex_da);
-                if let Ok(result) = kamakiri.run(self).await {
-                    self.patch = !result;
-                    if let Some(patched_da) = kamakiri.get_patched_da() {
-                        self.da = patched_da.to_owned();
-                    }
-                }
-            }
-        }
+        exploit!(Kamakiri, self);
 
         let da1 = self.da.get_da1().ok_or_else(|| Error::penumbra("DA1 region not found"))?;
         self.upload_stage1(da1.addr, da1.length, da1.data.clone(), da1.sig_len)
@@ -57,31 +41,13 @@ impl DAProtocol for XFlash {
 
         flash::get_packet_length(self).await?;
 
-        let (da2_addr, da2_original_data) = {
-            let da2 = self.da.get_da2().ok_or_else(|| Error::penumbra("DA2 region not found"))?;
-            let sig_len = da2.sig_len as usize;
-            let data = da2.data[..da2.data.len().saturating_sub(sig_len)].to_vec();
-            (da2.addr, data)
-        };
+        exploit!(Carbonara, self);
 
-        #[cfg(not(feature = "no_exploits"))]
-        let da2data = if self.patch {
-            let mutex_da = Arc::new(Mutex::new(self.da.clone()));
-            let mut carbonara = Carbonara::new(mutex_da);
-            match carbonara.run(self).await {
-                Ok(_) => {
-                    carbonara.get_patched_da2().map(|p| p.data.clone()).unwrap_or(da2_original_data)
-                }
-                Err(_) => da2_original_data,
-            }
-        } else {
-            da2_original_data
-        };
+        let da2 = self.da.get_da2().ok_or_else(|| Error::penumbra("DA2 region not found"))?;
+        let sig_len = da2.sig_len as usize;
+        let da2data = da2.data[..da2.data.len().saturating_sub(sig_len)].to_vec();
 
-        #[cfg(feature = "no_exploits")]
-        let da2data = da2_original_data;
-
-        match self.boot_to(da2_addr, &da2data).await {
+        match self.boot_to(da2.addr, &da2data).await {
             Ok(true) => {
                 info!("[Penumbra] Successfully uploaded and executed DA2");
                 self.handle_sla().await?;

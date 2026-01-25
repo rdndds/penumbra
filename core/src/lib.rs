@@ -9,6 +9,7 @@ pub mod device;
 pub mod error;
 #[cfg(not(feature = "no_exploits"))]
 pub mod exploit;
+pub mod macros;
 pub mod utilities;
 
 pub use connection::port::{MTKPort, find_mtk_port};

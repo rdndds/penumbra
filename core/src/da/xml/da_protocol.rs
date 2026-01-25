@@ -8,7 +8,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use log::{debug, error, info};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
-use tokio::sync::Mutex;
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -32,71 +31,45 @@ use crate::da::xml::sec::{parse_seccfg, write_seccfg};
 use crate::da::xml::{exts, patch};
 use crate::da::{DA, DAEntryRegion, Xml};
 use crate::error::{Error, Result};
+use crate::exploit;
 #[cfg(not(feature = "no_exploits"))]
+use crate::exploit::Carbonara;
 use crate::exploit::Exploit;
-#[cfg(not(feature = "no_exploits"))]
-use crate::exploit::carbonara::Carbonara;
 
 #[async_trait]
 impl DAProtocol for Xml {
     async fn upload_da(&mut self) -> Result<bool> {
-        let mutex_da = Arc::new(Mutex::new(self.da.clone()));
+        let da1 = self.da.get_da1().ok_or_else(|| Error::penumbra("DA1 region not found"))?;
 
-        let (da1addr, da1length, da1data, da1sig_len) = match self.da.get_da1() {
-            Some(da1) => (da1.addr, da1.length, da1.data.clone(), da1.sig_len),
-            None => return Err(Error::penumbra("DA1 region not found")),
-        };
-
-        self.upload_stage1(da1addr, da1length, da1data, da1sig_len)
+        self.upload_stage1(da1.addr, da1.length, da1.data.clone(), da1.sig_len)
             .await
             .map_err(|e| Error::proto(format!("Failed to upload XML DA1: {}", e)))?;
 
-        let da2 = match self.da.get_da2() {
-            Some(da2) => da2.clone(),
-            None => return Err(Error::penumbra("DA2 region not found")),
-        };
+        exploit!(Carbonara, self);
 
-        let da2addr = da2.addr;
-        let da2sig_len = da2.sig_len as usize;
-        let da2_original_data = da2.data[..da2.data.len().saturating_sub(da2sig_len)].to_vec();
+        let (da2_addr, da2_data) = {
+            let da2 = self.da.get_da2().ok_or_else(|| Error::penumbra("DA2 region not found"))?;
 
-        #[cfg(not(feature = "no_exploits"))]
-        let da2data = {
-            if self.patch {
-                let mut carbonara = Carbonara::new(mutex_da.clone());
+            let sig_len = da2.sig_len as usize;
+            let data = da2.data[..da2.data.len().saturating_sub(sig_len)].to_vec();
 
-                match carbonara.run(self).await {
-                    Ok(_) => carbonara
-                        .get_patched_da2()
-                        .map(|d| d.data.clone())
-                        .unwrap_or_else(|| da2_original_data.clone()),
-                    Err(_) => da2_original_data.clone(),
-                }
-            } else {
-                da2_original_data.clone()
-            }
-        };
-
-        #[cfg(feature = "no_exploits")]
-        let da2data = {
-            let _ = mutex_da;
-            da2_original_data.clone()
+            (da2.addr, data)
         };
 
         info!("Uploading and booting to XML DA2...");
-        self.boot_to(da2addr, &da2data)
+        self.boot_to(da2_addr, &da2_data)
             .await
             .map_err(|e| Error::proto(format!("Failed to upload and boot to XML DA2: {}", e)))?;
 
-        // This might fail on some devices, but we can ignore the error
+        info!("Successfully uploaded and booted to XML DA2");
+
+        // These may fail on some devices — safe to ignore
         xmlcmd_e!(self, HostSupportedCommands, HOST_CMDS).ok();
 
         xmlcmd!(self, NotifyInitHw)?;
         let mut mock_progress = |_, _| {};
         self.progress_report(&mut mock_progress).await?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
-
-        info!("Successfully uploaded and booted to XML DA2");
 
         #[cfg(not(feature = "no_exploits"))]
         self.boot_extensions().await?;
