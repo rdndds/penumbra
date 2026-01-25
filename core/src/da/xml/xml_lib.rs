@@ -8,6 +8,7 @@ use log::{debug, info, warn};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::time::{Duration, timeout};
 
+use crate::VERSION;
 use crate::connection::Connection;
 use crate::core::devinfo::DeviceInfo;
 use crate::core::storage::Storage;
@@ -20,6 +21,7 @@ use crate::da::xml::cmds::{
     HostSupportedCommands,
     MAGIC,
     NotifyInitHw,
+    SetHostInfo,
     SetRuntimeParameter,
     XmlCmdLifetime,
     XmlCommand,
@@ -399,6 +401,8 @@ impl Xml {
         let mut mock_progress = |_, _| {};
         self.progress_report(&mut mock_progress).await?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+
+        xmlcmd_e!(self, SetHostInfo, format!("Penumbra v{}", VERSION))?;
 
         Ok(true)
     }

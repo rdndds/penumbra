@@ -92,6 +92,12 @@ pub struct HostSupportedCommands {
 pub struct NotifyInitHw;
 
 #[derive(XmlCommand)]
+pub struct SetHostInfo {
+    #[xml(tag = "info")]
+    info: String,
+}
+
+#[derive(XmlCommand)]
 pub struct GetHwInfo {
     #[allow(dead_code)]
     #[xml(tag = "target_file", fmt = "MEM://0x0:0x200000")]
