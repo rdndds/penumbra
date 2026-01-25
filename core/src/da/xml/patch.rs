@@ -7,6 +7,7 @@ use log::{info, warn};
 
 use crate::da::{DA, DAEntryRegion, Xml};
 use crate::error::Result;
+use crate::exploit::get_v6_payload;
 use crate::utilities::analysis::{Aarch64Analyzer, ArchAnalyzer, ArmAnalyzer};
 use crate::utilities::arm::{encode_bl_arm, force_return as arm_force_return};
 use crate::utilities::arm64::{encode_bl as arm64_encode_bl, force_return as arm64_force_return};
@@ -15,7 +16,6 @@ use crate::utilities::patching::*;
 const SEJ_BASE_PATTERN_ARM64: &str = "0801XX52XX00805208XXXX72";
 const SEJ_BASE_PATTERN_ARM64_ALT: &str = "0901XX52XX031faa09XXXX72";
 const SEJ_BASE_PATTERN_ARM: &str = "0800XXE30210A0E3XXXX41E3";
-const V6_PAYLOAD_MAGIC: &[u8] = b"PENUMBRAV6P";
 const EXTLOADER: &[u8] = include_bytes!("../../../payloads/extloader_v6.bin");
 
 pub fn is_arm64(data: &[u8]) -> bool {
@@ -126,28 +126,6 @@ pub fn patch_boot_to(
     info!("Injected Ext-Loader to DA2 successfully.");
 
     Ok(true)
-}
-
-pub fn get_v6_payload(data: &[u8], is_arm64: bool) -> &[u8] {
-    if data.len() < 16 + 4 * 4 {
-        panic!("Data too short to contain a valid v6 header");
-    }
-
-    if &data[0..11] != V6_PAYLOAD_MAGIC {
-        panic!("Invalid v6 payload magic");
-    }
-
-    // Remove the MAGIC
-    let arm7_offset = u32::from_le_bytes(data[16..20].try_into().unwrap()) as usize + 8;
-    let arm7_length = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize - 8;
-    let arm64_offset = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize + 8;
-    let arm64_length = u32::from_le_bytes(data[28..32].try_into().unwrap()) as usize - 8;
-
-    if is_arm64 {
-        &data[arm64_offset..arm64_offset + arm64_length]
-    } else {
-        &data[arm7_offset..arm7_offset + arm7_length]
-    }
 }
 
 fn patch_security(
