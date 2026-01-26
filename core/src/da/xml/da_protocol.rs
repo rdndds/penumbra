@@ -57,9 +57,10 @@ impl DAProtocol for Xml {
         };
 
         info!("Uploading and booting to XML DA2...");
-        self.boot_to(da2_addr, &da2_data)
-            .await
-            .map_err(|e| Error::proto(format!("Failed to upload and boot to XML DA2: {}", e)))?;
+        if let Err(e) = self.boot_to(da2_addr, &da2_data).await {
+            self.reboot(BootMode::Normal).await.ok();
+            return Err(Error::proto(format!("Failed to upload XML DA2: {}", e)));
+        }
 
         info!("Successfully uploaded and booted to XML DA2");
 

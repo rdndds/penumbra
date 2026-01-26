@@ -65,7 +65,10 @@ impl DAProtocol for XFlash {
                 Ok(true)
             }
             Ok(false) => Err(Error::proto("Failed to execute DA2")),
-            Err(e) => Err(Error::proto(format!("Error uploading DA2: {}", e))),
+            Err(e) => {
+                self.reboot(BootMode::Normal).await.ok();
+                Err(Error::proto(format!("Error uploading DA2: {}", e)))
+            }
         }
     }
 
