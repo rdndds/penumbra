@@ -98,15 +98,6 @@ pub trait DAProtocol: DowncastSend {
     async fn read32(&mut self, addr: u32) -> Result<u32>;
     async fn write32(&mut self, addr: u32, value: u32) -> Result<()>;
 
-    #[cfg(not(feature = "no_exploits"))]
-    async fn peek(
-        &mut self,
-        addr: u32,
-        length: usize,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
-        progress: &mut (dyn FnMut(usize, usize) + Send),
-    ) -> Result<()>;
-
     async fn get_usb_speed(&mut self) -> Result<u32>;
     // fn set_usb_speed(&mut self, speed: u32) -> Result<(), Error>;
 
@@ -118,9 +109,26 @@ pub trait DAProtocol: DowncastSend {
     async fn get_storage_type(&mut self) -> StorageType;
     async fn get_partitions(&mut self) -> Vec<Partition>;
 
+    // DevInfo helpers
+    fn get_devinfo(&self) -> &DeviceInfo;
+    fn get_da(&self) -> &DA;
+
+    /* EXTENSIONS / EXPLOITS
+     * These functions won't be included if the "no_exploits" feature is enabled
+     */
+
     // Sec
     #[cfg(not(feature = "no_exploits"))]
     async fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>>;
+
+    #[cfg(not(feature = "no_exploits"))]
+    async fn peek(
+        &mut self,
+        addr: u32,
+        length: usize,
+        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()>;
 
     // DA Patching utils. These *must* be protocol specific, as different protocols
     // have different DA implementations
@@ -130,10 +138,6 @@ pub trait DAProtocol: DowncastSend {
     fn patch_da1(&mut self) -> Option<DAEntryRegion>;
     #[cfg(not(feature = "no_exploits"))]
     fn patch_da2(&mut self) -> Option<DAEntryRegion>;
-
-    // DevInfo helpers
-    fn get_devinfo(&self) -> &DeviceInfo;
-    fn get_da(&self) -> &DA;
 }
 
 impl_downcast!(DAProtocol);
