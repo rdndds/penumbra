@@ -28,10 +28,12 @@ struct GptHeader {
     header_size: u32,
     header_crc32: u32,
     part_array_crc32: u32,
+    sector_size: usize,
 }
 
 #[derive(Debug)]
 pub struct Gpt {
+    #[allow(dead_code)]
     header: GptHeader,
     partitions: Vec<Partition>,
 }
@@ -51,8 +53,7 @@ impl Gpt {
 
         let entries_data = match gpt_type {
             GptType::Pgpt => {
-                let sector_size = 512;
-                let start = header.part_entry_lba as usize * sector_size;
+                let start = header.part_entry_lba as usize * header_offset;
                 let len = header.num_entries as usize * header.entry_size as usize;
                 if data.len() < start + len {
                     return Err(Error::io("Partition array out of bounds"));
@@ -117,6 +118,7 @@ impl Gpt {
             num_entries: u32::from_le_bytes(hdr[80..84].try_into().unwrap()),
             entry_size: u32::from_le_bytes(hdr[84..88].try_into().unwrap()),
             part_array_crc32: u32::from_le_bytes(hdr[88..92].try_into().unwrap()),
+            sector_size: offset,
         })
     }
 
@@ -172,7 +174,7 @@ impl Gpt {
                     .collect::<Vec<_>>(),
             );
 
-            let sector_size = 512;
+            let sector_size = header.sector_size;
             let size_bytes = (last_lba - first_lba + 1) * sector_size as u64;
 
             parts.push(Partition::new(
@@ -188,17 +190,20 @@ impl Gpt {
 
     fn detect_type(data: &[u8]) -> Option<(GptType, usize)> {
         let end = data.len();
-        for &hdr_len in &[92, 512, 4096] {
-            if end >= hdr_len && &data[end - hdr_len..end - hdr_len + 8] == EFI_PART_SIGNATURE {
-                return Some((GptType::Sgpt, end - hdr_len));
+        let sector_sizes = [512, 1024, 2048, 4096, 8192];
+
+        for &sector_size in &sector_sizes {
+            if end >= sector_size + 8 && &data[end - sector_size..end - sector_size + 8] == EFI_PART_SIGNATURE {
+                return Some((GptType::Sgpt, end - sector_size));
             }
         }
-        let sector_size = 512;
-        if data.len() >= sector_size + 8
-            && &data[sector_size..sector_size + 8] == EFI_PART_SIGNATURE
-        {
-            return Some((GptType::Pgpt, sector_size));
+
+        for &sector_size in &sector_sizes {
+            if data.len() >= sector_size + 8 && &data[sector_size..sector_size + 8] == EFI_PART_SIGNATURE {
+                return Some((GptType::Pgpt, sector_size));
+            }
         }
+
         None
     }
 }
