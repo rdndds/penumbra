@@ -198,14 +198,16 @@ impl Aarch64Analyzer {
             let instr = self.read_u32(off)?;
 
             if let Some((rn, rd, imm)) = self.decode_add_imm(instr)
-                && rd == cur_reg {
-                    return self.resolve_adrp_part(off, start, rn, imm);
-                }
+                && rd == cur_reg
+            {
+                return self.resolve_adrp_part(off, start, rn, imm);
+            }
 
             if let Some((rm, rd)) = self.decode_mov_register(instr)
-                && rd == cur_reg {
-                    cur_reg = rm;
-                }
+                && rd == cur_reg
+            {
+                cur_reg = rm;
+            }
         }
 
         None
@@ -224,9 +226,10 @@ impl Aarch64Analyzer {
             let pc = self.base_addr + off as u64;
 
             if let Some((page, rd)) = self.decode_adrp(instr, pc)
-                && rd == reg {
-                    return Some(page + imm as u64);
-                }
+                && rd == reg
+            {
+                return Some(page + imm as u64);
+            }
 
             if off <= limit || off < 4 {
                 break;
@@ -303,5 +306,9 @@ impl ArchAnalyzer for Aarch64Analyzer {
 
     fn find_function_start_from_off(&self, offset: usize) -> Option<usize> {
         self.find_function_start(offset)
+    }
+
+    fn data(&self) -> &[u8] {
+        &self.data
     }
 }

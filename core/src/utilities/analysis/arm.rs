@@ -189,9 +189,10 @@ impl ArmAnalyzer {
             let pc = self.base_addr + offset as u64;
 
             if let Some((_, addr)) = self.decode_ldr_pc(instr, pc)
-                && addr == str_va as u64 {
-                    return Some(offset);
-                }
+                && addr == str_va as u64
+            {
+                return Some(offset);
+            }
         }
 
         None
@@ -236,9 +237,10 @@ impl ArmAnalyzer {
 
         while current >= end && current > 0 {
             if let Some(instr) = self.read_u32(current)
-                && self.is_prologue(instr) {
-                    return Some(current);
-                }
+                && self.is_prologue(instr)
+            {
+                return Some(current);
+            }
 
             if current < 4 {
                 break;
@@ -270,9 +272,10 @@ impl ArmAnalyzer {
             }
 
             if let Some((rm, rd)) = self.decode_mov(instr)
-                && rd == reg {
-                    reg = rm;
-                }
+                && rd == reg
+            {
+                reg = rm;
+            }
 
             if off < 4 {
                 break;
@@ -377,5 +380,9 @@ impl ArchAnalyzer for ArmAnalyzer {
 
     fn find_function_start_from_off(&self, offset: usize) -> Option<usize> {
         self.find_function_start(offset)
+    }
+
+    fn data(&self) -> &[u8] {
+        &self.data
     }
 }

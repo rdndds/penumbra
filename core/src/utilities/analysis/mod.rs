@@ -47,6 +47,8 @@ pub trait ArchAnalyzer: Downcast {
         let va = self.get_bl_target(offset)?;
         self.va_to_offset(va)
     }
+
+    fn data(&self) -> &[u8];
 }
 
 impl_downcast!(ArchAnalyzer);
