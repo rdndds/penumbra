@@ -62,6 +62,23 @@ pub enum EmmcPartition {
     Boot1Boot2 = 10,
 }
 
+impl EmmcPartition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EmmcPartition::Boot1 => "EMMC-BOOT1",
+            EmmcPartition::Boot2 => "EMMC-BOOT2",
+            EmmcPartition::Rpmb => "EMMC-RPMB",
+            EmmcPartition::Gp1 => "EMMC-GP1",
+            EmmcPartition::Gp2 => "EMMC-GP2",
+            EmmcPartition::Gp3 => "EMMC-GP3",
+            EmmcPartition::Gp4 => "EMMC-GP4",
+            EmmcPartition::User => "EMMC-USER",
+            EmmcPartition::End => "EMMC-END",
+            EmmcPartition::Boot1Boot2 => "EMMC-BOOT1BOOT2",
+        }
+    }
+}
+
 /// Represents eMMC storage device.
 pub struct EmmcStorage {
     /// eMMC storage information.

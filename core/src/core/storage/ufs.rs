@@ -41,6 +41,23 @@ pub enum UfsPartition {
     Lu0Lu1 = 9,
 }
 
+impl UfsPartition {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UfsPartition::Lu0 => "UFS-LUA0",
+            UfsPartition::Lu1 => "UFS-LUA1",
+            UfsPartition::Lu2 => "UFS-LUA2",
+            UfsPartition::Lu3 => "UFS-LUA3",
+            UfsPartition::Lu4 => "UFS-LUA4",
+            UfsPartition::Lu5 => "UFS-LUA5",
+            UfsPartition::Lu6 => "UFS-LUA6",
+            UfsPartition::Lu7 => "UFS-LUA7",
+            UfsPartition::Lu0Lu1 => "UFS-LUA0LUA1",
+            UfsPartition::Unknown => "UFS-UNKNOWN", // Assumed to be unreachable
+        }
+    }
+}
+
 pub struct UfsStorage {
     pub info: UfsInfo,
 }

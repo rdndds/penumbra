@@ -43,6 +43,14 @@ impl PartitionKind {
             PartitionKind::Unknown => 0,
         }
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PartitionKind::Emmc(part) => part.as_str(),
+            PartitionKind::Ufs(part) => part.as_str(),
+            PartitionKind::Unknown => "Unknown",
+        }
+    }
 }
 
 #[async_trait::async_trait]
