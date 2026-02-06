@@ -460,6 +460,19 @@ impl Xml {
 
         info!("DA SLA is enabled");
 
+        let mut progress = |_, _| {};
+
+        #[cfg(not(feature = "no_exploits"))]
+        {
+            let dummy_sig = vec![0u8; 256];
+            xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
+            self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress).await?;
+            if self.lifetime_ack(XmlCmdLifetime::CmdEnd).await.is_ok() {
+                info!("DA SLA signature accepted (dummy)!");
+                return Ok(true);
+            }
+        }
+
         xmlcmd!(self, SecurityGetDevFwInfo, "0")?;
         let fw_info = self.get_upload_file_resp().await?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
@@ -482,7 +495,6 @@ impl Xml {
         let sign_req =
             SignRequest { data: sign_data, purpose: SignPurpose::DaSla, pubk_mod: da2_data };
 
-        let mut progress = |_, _| {};
         if auth.can_sign(&sign_req) {
             info!("Found signer for DA SLA!");
             let signed_rnd = auth.sign(&sign_req).await?;
@@ -495,20 +507,8 @@ impl Xml {
             return Ok(true);
         }
 
-        info!("No signer available for DA SLA! Trying dummy signature...");
-        let dummy_sig = vec![0u8; 256];
-        xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
-        self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress).await?;
-        match self.lifetime_ack(XmlCmdLifetime::CmdEnd).await {
-            Ok(a) => {
-                info!("DA SLA signature accepted (dummy) {}!", a);
-                Ok(true)
-            }
-            Err(e) => {
-                error!("DA SLA signature rejected (dummy), can't proceed! {}", e);
-                Err(e)
-            }
-        }
+        error!("No signer available for DA SLA! Can't proceed.");
+        Err(Error::penumbra("DA SLA is enabled, but no signer is available. Can't continue."))
     }
 
     #[cfg(not(feature = "no_exploits"))]

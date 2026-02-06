@@ -245,6 +245,15 @@ impl XFlash {
 
         info!("DA SLA is enabled");
 
+        #[cfg(not(feature = "no_exploits"))]
+        {
+            let dummy_sig = vec![0u8; 256];
+            if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).await.is_ok() {
+                info!("DA SLA signature accepted (dummy)!");
+                return Ok(true);
+            }
+        }
+
         let firmware_info = self.devctrl(Cmd::GetDevFwInfo, None).await?;
         debug!("Firmware Info: {:02X?}", firmware_info);
         let rnd = &firmware_info[4..4 + 0x10];
@@ -274,17 +283,7 @@ impl XFlash {
             return Ok(true);
         }
 
-        info!("No signer available for DA SLA! Trying dummy signature...");
-        let dummy_sig = vec![0u8; 256];
-        match self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).await {
-            Ok(_) => {
-                info!("DA SLA signature accepted (dummy)!");
-                Ok(true)
-            }
-            Err(e) => {
-                error!("DA SLA signature rejected (dummy): {}", e);
-                Err(e)
-            }
-        }
+        error!("No signer available for DA SLA! Can't proceed.");
+        Err(Error::penumbra("DA SLA is enabled, but no signer is available. Can't continue."))
     }
 }
