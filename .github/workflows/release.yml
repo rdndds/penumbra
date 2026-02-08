@@ -1,0 +1,260 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate timestamp tag
+        id: tag
+        run: |
+          TAG=$(date +'%Y.%m.%d.%H%M')
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Generated tag: $TAG"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a "${{ steps.tag.outputs.tag }}" -m "Release ${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}"
+
+  build-linux-x86_64:
+    needs: create-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config libglib2.0-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Build
+        run: cargo build --release --package antumbra
+
+      - name: Strip binary
+        run: strip target/release/antumbra
+
+      - name: Rename binary
+        run: mv target/release/antumbra antumbra-linux-x86_64
+
+      - name: Calculate SHA256
+        run: sha256sum antumbra-linux-x86_64 > antumbra-linux-x86_64.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: antumbra-linux-x86_64
+          path: |
+            antumbra-linux-x86_64
+            antumbra-linux-x86_64.sha256
+
+  build-linux-arm64:
+    needs: create-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: cross build --release --package antumbra --target aarch64-unknown-linux-gnu
+
+      - name: Rename binary
+        run: mv target/aarch64-unknown-linux-gnu/release/antumbra antumbra-linux-arm64
+
+      - name: Calculate SHA256
+        run: sha256sum antumbra-linux-arm64 > antumbra-linux-arm64.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: antumbra-linux-arm64
+          path: |
+            antumbra-linux-arm64
+            antumbra-linux-arm64.sha256
+
+  build-windows:
+    needs: create-tag
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build
+        run: cargo build --release --package antumbra --target x86_64-pc-windows-msvc
+
+      - name: Rename binary
+        run: mv target/x86_64-pc-windows-msvc/release/antumbra.exe antumbra.exe
+
+      - name: Calculate SHA256
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash antumbra.exe -Algorithm SHA256
+          "$($hash.Hash)  antumbra.exe" | Out-File -FilePath antumbra.exe.sha256 -Encoding ASCII
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: antumbra-windows
+          path: |
+            antumbra.exe
+            antumbra.exe.sha256
+
+  build-macos:
+    needs: create-tag
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build
+        run: cargo build --release --package antumbra --target aarch64-apple-darwin
+
+      - name: Strip binary
+        run: strip target/aarch64-apple-darwin/release/antumbra
+
+      - name: Rename binary
+        run: mv target/aarch64-apple-darwin/release/antumbra antumbra-darwin-aarch64
+
+      - name: Calculate SHA256
+        run: shasum -a 256 antumbra-darwin-aarch64 > antumbra-darwin-aarch64.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: antumbra-darwin
+          path: |
+            antumbra-darwin-aarch64
+            antumbra-darwin-aarch64.sha256
+
+  build-windows-drivers:
+    needs: create-tag
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-tag.outputs.tag }}
+
+      - name: Install NSIS
+        run: |
+          choco install nsis
+
+      - name: Build driver installer
+        working-directory: scripts/drivers
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" installer.nsi
+
+      - name: Move installer
+        run: mv scripts/drivers/PenumbraDrivers.exe PenumbraDrivers.exe
+
+      - name: Calculate SHA256
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash PenumbraDrivers.exe -Algorithm SHA256
+          "$($hash.Hash)  PenumbraDrivers.exe" | Out-File -FilePath PenumbraDrivers.exe.sha256 -Encoding ASCII
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: penumbra-drivers
+          path: |
+            PenumbraDrivers.exe
+            PenumbraDrivers.exe.sha256
+
+  create-release:
+    needs: [create-tag, build-linux-x86_64, build-linux-arm64, build-windows, build-macos, build-windows-drivers]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Prepare release files
+        run: |
+          mkdir release
+          cp antumbra-linux-x86_64/antumbra-linux-x86_64 release/
+          cp antumbra-linux-arm64/antumbra-linux-arm64 release/
+          cp antumbra-windows/antumbra.exe release/
+          cp antumbra-darwin/antumbra-darwin-aarch64 release/
+          cp penumbra-drivers/PenumbraDrivers.exe release/
+
+      - name: Create checksums file
+        working-directory: release
+        run: |
+          echo "# SHA256 Checksums" > checksums.txt
+          echo "" >> checksums.txt
+          echo "## antumbra (Linux x86_64)" >> checksums.txt
+          sha256sum antumbra-linux-x86_64 >> checksums.txt
+          echo "" >> checksums.txt
+          echo "## antumbra (Linux ARM64)" >> checksums.txt
+          sha256sum antumbra-linux-arm64 >> checksums.txt
+          echo "" >> checksums.txt
+          echo "## antumbra.exe (Windows x86_64)" >> checksums.txt
+          sha256sum antumbra.exe >> checksums.txt
+          echo "" >> checksums.txt
+          echo "## Penumbra Drivers (Windows x86_64)" >> checksums.txt
+          sha256sum PenumbraDrivers.exe >> checksums.txt
+          echo "" >> checksums.txt
+          echo "## antumbra-darwin-aarch64 (macOS ARM64)" >> checksums.txt
+          sha256sum antumbra-darwin-aarch64 >> checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag }}
+          name: Release ${{ needs.create-tag.outputs.tag }}
+          files: |
+            release/antumbra-linux-x86_64
+            release/antumbra-linux-arm64
+            release/antumbra.exe
+            release/antumbra-darwin-aarch64
+            release/PenumbraDrivers.exe
+            release/checksums.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
