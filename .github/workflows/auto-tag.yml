@@ -1,0 +1,35 @@
+name: Auto Tag
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tag:
+    name: Create date tag
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Create and push tag
+      run: |
+        set -euo pipefail
+        tag_date=$(date -u +%Y.%m.%d)
+        tag="v${tag_date}.${GITHUB_RUN_NUMBER}"
+
+        if git rev-parse "$tag" >/dev/null 2>&1; then
+          echo "Tag already exists: $tag"
+          exit 0
+        fi
+
+        git tag "$tag" "$GITHUB_SHA"
+        git push origin "$tag"
