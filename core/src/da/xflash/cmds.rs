@@ -54,8 +54,11 @@ pub enum Cmd {
     SetRemoteSecPolicy = 0x02000B,
     SetAllInOneSig = 0x02000C,
     SetRscInfo = 0x02000D,
+    SetRebootMode = 0x02000E,
+    SetCertFile = 0x02000F,
     SetUpdateFw = 0x020010,
     SetUfsConfig = 0x020011,
+    SetDynamicPartMap = 0x020012,
 
     GetEmmcInfo = 0x040001,
     GetNandInfo = 0x040002,
@@ -86,6 +89,7 @@ pub enum Cmd {
     DisableEmmcHwresetPin = 0x080004,
     CcOptionalDownloadAct = 0x080005,
     DaStorLifeCycleCheck = 0x080007,
+    DisableSparseErase = 0x080008,
 
     UnknownCtrlCode = 0x0E0000,
     CtrlStorageTest = 0x0E0001,

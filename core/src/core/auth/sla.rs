@@ -31,7 +31,13 @@ pub struct SignRequest {
 
 #[async_trait]
 pub trait Signer: Send + Sync {
-    fn can_sign(&self, req: &SignRequest) -> bool;
+    /// Whether the signer can handle a a sign request,
+    /// for example, if it matches the public key
+    fn can_handle(&self, pubk_mod: &[u8]) -> bool;
+    /// Whether the signer authorizes a sign request to be signed
+    /// at all. For example, if a device is banned or restricted.
+    async fn is_authorized(&self, req: &SignRequest) -> bool;
+    /// Signs the SLA challenge and returns the signed data
     async fn sign(&self, req: &SignRequest) -> Result<Vec<u8>>;
 }
 
@@ -67,25 +73,34 @@ impl AuthManager {
     }
 
     /// Return whether any of the registered signers can sign the given request.
-    pub fn can_sign(&self, req: &SignRequest) -> bool {
+    pub fn can_sign(&self, pubk: &[u8]) -> bool {
         let signers = match self.signers.read() {
             Ok(signers) => signers,
             Err(_) => return false,
         };
 
-        signers.iter().any(|signer| signer.can_sign(req))
+        for signer in signers.iter() {
+            if signer.can_handle(pubk) {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Signs the given request using the first capable signer.
     pub async fn sign(&self, req: &SignRequest) -> Result<Vec<u8>> {
-        let signer = {
+        let signers = {
             let list = self.signers.read()?;
-            list.iter().find(|s| s.can_sign(req)).cloned()
+            list.clone()
         };
 
-        match signer {
-            Some(s) => s.sign(req).await,
-            None => Err(Error::penumbra("Could not find any signer")),
+        for signer in signers {
+            if signer.can_handle(&req.pubk_mod) && signer.is_authorized(req).await {
+                return signer.sign(req).await;
+            }
         }
+
+        Err(Error::penumbra("Could not find any signer"))
     }
 }

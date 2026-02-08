@@ -460,17 +460,31 @@ impl Xml {
 
         info!("DA SLA is enabled");
 
+        let da2_data = match self.da.get_da2() {
+            Some(da2) => da2.data.clone(),
+            None => Vec::new(),
+        };
+
+        let auth = AuthManager::get();
         let mut progress = |_, _| {};
 
-        #[cfg(not(feature = "no_exploits"))]
-        {
-            let dummy_sig = vec![0u8; 256];
-            xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
-            self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress).await?;
-            if self.lifetime_ack(XmlCmdLifetime::CmdEnd).await.is_ok() {
-                info!("DA SLA signature accepted (dummy)!");
-                return Ok(true);
+        if !auth.can_sign(&da2_data) {
+            #[cfg(not(feature = "no_exploits"))]
+            {
+                info!("No available signers for DA SLA, trying dummy signature...");
+                let dummy_sig = vec![0u8; 256];
+                xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
+                self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress).await?;
+                if self.lifetime_ack(XmlCmdLifetime::CmdEnd).await.is_ok() {
+                    info!("DA SLA signature accepted (dummy)!");
+                    return Ok(true);
+                }
             }
+
+            error!("No signer available for DA SLA! Can't proceed.");
+            return Err(Error::penumbra(
+                "DA SLA is enabled, but no signer is available. Can't continue.",
+            ));
         }
 
         xmlcmd!(self, SecurityGetDevFwInfo, "0")?;
@@ -485,30 +499,19 @@ impl Xml {
         let hrid = hex::decode(hrid_str).map_err(|_| Error::proto("Invalid hrid response"))?;
         let soc_id = hex::decode(socid_str).map_err(|_| Error::proto("Invalid socid response"))?;
 
-        let da2_data = match self.da.get_da2() {
-            Some(da2) => da2.data.clone(),
-            None => Vec::new(),
-        };
-
-        let auth = AuthManager::get();
         let sign_data = SignData { rnd, hrid, soc_id, raw: fw_info.into() };
         let sign_req =
             SignRequest { data: sign_data, purpose: SignPurpose::DaSla, pubk_mod: da2_data };
 
-        if auth.can_sign(&sign_req) {
-            info!("Found signer for DA SLA!");
-            let signed_rnd = auth.sign(&sign_req).await?;
-            info!("Signed DA SLA challenge. Uploading to device...");
+        info!("Found signer for DA SLA!");
+        let signed_rnd = auth.sign(&sign_req).await?;
+        info!("Signed DA SLA challenge. Uploading to device...");
 
-            xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra SLA challenge")?;
-            self.download_file(signed_rnd.len(), signed_rnd.as_slice(), &mut progress).await?;
-            self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
-            info!("DA SLA signature accepted!");
-            return Ok(true);
-        }
-
-        error!("No signer available for DA SLA! Can't proceed.");
-        Err(Error::penumbra("DA SLA is enabled, but no signer is available. Can't continue."))
+        xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra SLA challenge")?;
+        self.download_file(signed_rnd.len(), signed_rnd.as_slice(), &mut progress).await?;
+        self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+        info!("DA SLA signature accepted!");
+        Ok(true)
     }
 
     #[cfg(not(feature = "no_exploits"))]

@@ -245,13 +245,27 @@ impl XFlash {
 
         info!("DA SLA is enabled");
 
-        #[cfg(not(feature = "no_exploits"))]
-        {
-            let dummy_sig = vec![0u8; 256];
-            if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).await.is_ok() {
-                info!("DA SLA signature accepted (dummy)!");
-                return Ok(true);
+        let da2_data = match self.da.get_da2() {
+            Some(da2) => da2.data.clone(),
+            None => Vec::new(),
+        };
+
+        let auth = AuthManager::get();
+        if !auth.can_sign(&da2_data) {
+            #[cfg(not(feature = "no_exploits"))]
+            {
+                info!("No available signers for DA SLA, trying dummy signature...");
+                let dummy_sig = vec![0u8; 256];
+                if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).await.is_ok() {
+                    info!("DA SLA signature accepted (dummy)!");
+                    return Ok(true);
+                }
             }
+
+            error!("No signer available for DA SLA! Can't proceed.");
+            return Err(Error::penumbra(
+                "DA SLA is enabled, but no signer is available. Can't continue.",
+            ));
         }
 
         let firmware_info = self.devctrl(Cmd::GetDevFwInfo, None).await?;
@@ -259,10 +273,6 @@ impl XFlash {
         let rnd = &firmware_info[4..4 + 0x10];
         let hrid = &firmware_info[4 + 0x10..4 + 0x10 + 16];
         let soc_id = &firmware_info[4 + 0x10 + 16..4 + 0x10 + 16 + 32];
-        let da2_data = match self.da.get_da2() {
-            Some(da2) => da2.data.clone(),
-            None => Vec::new(),
-        };
 
         let sign_data = SignData {
             rnd: rnd.to_vec(),
@@ -270,20 +280,14 @@ impl XFlash {
             soc_id: soc_id.to_vec(),
             raw: firmware_info.to_vec(),
         };
-        let auth = AuthManager::get();
         let sign_req =
             SignRequest { data: sign_data, purpose: SignPurpose::DaSla, pubk_mod: da2_data };
 
-        if auth.can_sign(&sign_req) {
-            info!("Found signer for DA SLA!");
-            let signed_rnd = auth.sign(&sign_req).await?;
-            info!("Signed DA SLA challenge. Uploading to device...");
-            self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&signed_rnd])).await?;
-            info!("DA SLA signature accepted!");
-            return Ok(true);
-        }
-
-        error!("No signer available for DA SLA! Can't proceed.");
-        Err(Error::penumbra("DA SLA is enabled, but no signer is available. Can't continue."))
+        info!("Found signer for DA SLA!");
+        let signed_rnd = auth.sign(&sign_req).await?;
+        info!("Signed DA SLA challenge. Uploading to device...");
+        self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&signed_rnd])).await?;
+        info!("DA SLA signature accepted!");
+        Ok(true)
     }
 }

@@ -31,10 +31,12 @@ impl Signer for LocalKeyring {
         Ok(signature)
     }
 
-    fn can_sign(&self, req: &SignRequest) -> bool {
-        self.keys
-            .iter()
-            .any(|k| contains_bytes(&req.pubk_mod, &k.n().to_bytes_be()) != HEX_NOT_FOUND)
+    fn can_handle(&self, pubk_mod: &[u8]) -> bool {
+        self.keys.iter().any(|k| contains_bytes(pubk_mod, &k.n().to_bytes_be()) != HEX_NOT_FOUND)
+    }
+
+    async fn is_authorized(&self, _req: &SignRequest) -> bool {
+        true
     }
 }
 
