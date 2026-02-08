@@ -20,7 +20,6 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            features: "libusb,serial"
             artifact_name: antumbra
             package_name: antumbra-linux-x86_64
             
@@ -59,7 +58,7 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Build
-      run: cargo build --release --target ${{ matrix.target }} --features "${{ matrix.features }}"
+      run: cargo build --release --target ${{ matrix.target }}
 
     - name: Package artifacts
       shell: bash
