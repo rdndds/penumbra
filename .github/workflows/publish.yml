@@ -105,8 +105,8 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: nightly
-        name: Nightly
+        tag_name: latest
+        name: Latest
         target_commitish: ${{ github.sha }}
         files: |
           release/*.tar.gz
@@ -114,6 +114,6 @@ jobs:
           release/checksums.txt
         generate_release_notes: true
         draft: false
-        prerelease: true
+        prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
