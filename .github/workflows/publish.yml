@@ -2,8 +2,7 @@ name: Publish
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,14 +18,12 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            features: "libusb,serial"
             artifact_name: antumbra
             package_name: antumbra-linux-x86_64
             
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            features: "nusb"
             artifact_name: antumbra.exe
             package_name: antumbra-windows-x86_64
 
@@ -58,7 +55,7 @@ jobs:
           ${{ runner.os }}-cargo-
 
     - name: Build
-      run: cargo build --release --target ${{ matrix.target }} --features "${{ matrix.features }}"
+      run: cargo build --release --target ${{ matrix.target }}
 
     - name: Package release artifacts
       shell: bash
@@ -108,12 +105,15 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
+        tag_name: nightly
+        name: Nightly
+        target_commitish: ${{ github.sha }}
         files: |
           release/*.tar.gz
           release/*.zip
           release/checksums.txt
         generate_release_notes: true
         draft: false
-        prerelease: false
+        prerelease: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
