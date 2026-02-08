@@ -2,11 +2,13 @@ name: Publish
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -89,6 +91,28 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Create tag
+      id: tag
+      run: |
+        set -euo pipefail
+        tag="v$(date -u +%Y.%m.%d).${GITHUB_RUN_NUMBER}"
+
+        if git rev-parse "$tag" >/dev/null 2>&1; then
+          echo "Tag already exists: $tag"
+        else
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$tag" "$GITHUB_SHA"
+          git push origin "$tag"
+        fi
+
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
     - name: Delete existing release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -115,8 +139,8 @@ jobs:
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: ${{ github.ref_name }}
-        name: ${{ github.ref_name }}
+        tag_name: ${{ steps.tag.outputs.tag }}
+        name: ${{ steps.tag.outputs.tag }}
         target_commitish: ${{ github.sha }}
         files: |
           release/*.tar.gz
