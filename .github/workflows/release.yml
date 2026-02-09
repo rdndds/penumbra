@@ -136,6 +136,15 @@ jobs:
         with:
           ref: ${{ needs.create-tag.outputs.tag }}
 
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/Microsoft/vcpkg.git $env:VCPKG_INSTALLATION_ROOT
+          & $env:VCPKG_INSTALLATION_ROOT\bootstrap-vcpkg.bat
+
+      - name: Install libusb via vcpkg
+        run: |
+          & $env:VCPKG_INSTALLATION_ROOT\vcpkg.exe install libusb:x64-windows-static
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -152,8 +161,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build
-        run: cargo build --release --package antumbra --target x86_64-pc-windows-msvc
+      - name: Build with libusb
+        run: cargo build --release --features libusb --package antumbra --target x86_64-pc-windows-msvc
+        env:
+          LIBUSB_LIB_DIR: ${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows-static\lib
 
       - name: Rename binary
         run: mv target/x86_64-pc-windows-msvc/release/antumbra.exe antumbra.exe
@@ -180,6 +191,9 @@ jobs:
         with:
           ref: ${{ needs.create-tag.outputs.tag }}
 
+      - name: Install libusb
+        run: brew install libusb pkg-config
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -196,8 +210,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - name: Build
-        run: cargo build --release --package antumbra --target aarch64-apple-darwin
+      - name: Build with libusb
+        run: cargo build --release --features libusb --package antumbra --target aarch64-apple-darwin
 
       - name: Strip binary
         run: strip target/aarch64-apple-darwin/release/antumbra
