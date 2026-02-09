@@ -79,54 +79,54 @@ jobs:
             antumbra-linux-x86_64
             antumbra-linux-x86_64.sha256
 
-  build-linux-arm64:
-    needs: create-tag
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.create-tag.outputs.tag }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Build
-        run: cross build --release --package antumbra --target aarch64-unknown-linux-gnu
-
-      - name: Rename binary
-        run: mv target/aarch64-unknown-linux-gnu/release/antumbra antumbra-linux-arm64
-
-      - name: Calculate SHA256
-        run: sha256sum antumbra-linux-arm64 > antumbra-linux-arm64.sha256
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: antumbra-linux-arm64
-          path: |
-            antumbra-linux-arm64
-            antumbra-linux-arm64.sha256
+  # build-linux-arm64:
+  #   needs: create-tag
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ needs.create-tag.outputs.tag }}
+  #
+  #     - name: Install dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y gcc-aarch64-linux-gnu
+  #
+  #     - name: Install Rust
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: aarch64-unknown-linux-gnu
+  #
+  #     - name: Cache cargo dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/registry
+  #           ~/.cargo/git
+  #           target
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-cargo-
+  #
+  #     - name: Install cross
+  #       run: cargo install cross --git https://github.com/cross-rs/cross
+  #
+  #     - name: Build
+  #       run: cross build --release --package antumbra --target aarch64-unknown-linux-gnu
+  #
+  #     - name: Rename binary
+  #       run: mv target/aarch64-unknown-linux-gnu/release/antumbra antumbra-linux-arm64
+  #
+  #     - name: Calculate SHA256
+  #       run: sha256sum antumbra-linux-arm64 > antumbra-linux-arm64.sha256
+  #
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: antumbra-linux-arm64
+  #         path: |
+  #           antumbra-linux-arm64
+  #           antumbra-linux-arm64.sha256
 
   build-windows:
     needs: create-tag
@@ -183,52 +183,52 @@ jobs:
             antumbra.exe
             antumbra.exe.sha256
 
-  build-macos:
-    needs: create-tag
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.create-tag.outputs.tag }}
-
-      - name: Install libusb
-        run: brew install libusb pkg-config
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Cache cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Build with libusb
-        run: cargo build --release --features libusb --package antumbra --target aarch64-apple-darwin
-
-      - name: Strip binary
-        run: strip target/aarch64-apple-darwin/release/antumbra
-
-      - name: Rename binary
-        run: mv target/aarch64-apple-darwin/release/antumbra antumbra-darwin-aarch64
-
-      - name: Calculate SHA256
-        run: shasum -a 256 antumbra-darwin-aarch64 > antumbra-darwin-aarch64.sha256
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: antumbra-darwin
-          path: |
-            antumbra-darwin-aarch64
-            antumbra-darwin-aarch64.sha256
+  # build-macos:
+  #   needs: create-tag
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #       with:
+  #         ref: ${{ needs.create-tag.outputs.tag }}
+  #
+  #     - name: Install libusb
+  #       run: brew install libusb pkg-config
+  #
+  #     - name: Install Rust
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: aarch64-apple-darwin
+  #
+  #     - name: Cache cargo dependencies
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: |
+  #           ~/.cargo/registry
+  #           ~/.cargo/git
+  #           target
+  #         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #         restore-keys: |
+  #           ${{ runner.os }}-cargo-
+  #
+  #     - name: Build with libusb
+  #       run: cargo build --release --features libusb --package antumbra --target aarch64-apple-darwin
+  #
+  #     - name: Strip binary
+  #       run: strip target/aarch64-apple-darwin/release/antumbra
+  #
+  #     - name: Rename binary
+  #       run: mv target/aarch64-apple-darwin/release/antumbra antumbra-darwin-aarch64
+  #
+  #     - name: Calculate SHA256
+  #       run: shasum -a 256 antumbra-darwin-aarch64 > antumbra-darwin-aarch64.sha256
+  #
+  #     - name: Upload artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: antumbra-darwin
+  #         path: |
+  #           antumbra-darwin-aarch64
+  #           antumbra-darwin-aarch64.sha256
 
   build-windows-drivers:
     needs: create-tag
@@ -265,7 +265,7 @@ jobs:
             PenumbraDrivers.exe.sha256
 
   create-release:
-    needs: [create-tag, build-linux-x86_64, build-linux-arm64, build-windows, build-macos, build-windows-drivers]
+    needs: [create-tag, build-linux-x86_64, build-windows, build-windows-drivers]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -275,9 +275,9 @@ jobs:
         run: |
           mkdir release
           cp antumbra-linux-x86_64/antumbra-linux-x86_64 release/
-          cp antumbra-linux-arm64/antumbra-linux-arm64 release/
+          # cp antumbra-linux-arm64/antumbra-linux-arm64 release/
           cp antumbra-windows/antumbra.exe release/
-          cp antumbra-darwin/antumbra-darwin-aarch64 release/
+          # cp antumbra-darwin/antumbra-darwin-aarch64 release/
           cp penumbra-drivers/PenumbraDrivers.exe release/
 
       - name: Create checksums file
@@ -288,17 +288,17 @@ jobs:
           echo "## antumbra (Linux x86_64)" >> checksums.txt
           sha256sum antumbra-linux-x86_64 >> checksums.txt
           echo "" >> checksums.txt
-          echo "## antumbra (Linux ARM64)" >> checksums.txt
-          sha256sum antumbra-linux-arm64 >> checksums.txt
-          echo "" >> checksums.txt
+          # echo "## antumbra (Linux ARM64)" >> checksums.txt
+          # sha256sum antumbra-linux-arm64 >> checksums.txt
+          # echo "" >> checksums.txt
           echo "## antumbra.exe (Windows x86_64)" >> checksums.txt
           sha256sum antumbra.exe >> checksums.txt
           echo "" >> checksums.txt
           echo "## Penumbra Drivers (Windows x86_64)" >> checksums.txt
           sha256sum PenumbraDrivers.exe >> checksums.txt
-          echo "" >> checksums.txt
-          echo "## antumbra-darwin-aarch64 (macOS ARM64)" >> checksums.txt
-          sha256sum antumbra-darwin-aarch64 >> checksums.txt
+          # echo "" >> checksums.txt
+          # echo "## antumbra-darwin-aarch64 (macOS ARM64)" >> checksums.txt
+          # sha256sum antumbra-darwin-aarch64 >> checksums.txt
           cat checksums.txt
 
       - name: Create Release
@@ -308,9 +308,7 @@ jobs:
           name: Release ${{ needs.create-tag.outputs.tag }}
           files: |
             release/antumbra-linux-x86_64
-            release/antumbra-linux-arm64
             release/antumbra.exe
-            release/antumbra-darwin-aarch64
             release/PenumbraDrivers.exe
             release/checksums.txt
           generate_release_notes: true
