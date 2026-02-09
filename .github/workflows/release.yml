@@ -162,7 +162,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Build with libusb
-        run: cargo build --release --features libusb --package antumbra --target x86_64-pc-windows-msvc
+        run: cargo build --release --features libusb --target x86_64-pc-windows-msvc
         env:
           LIBUSB_LIB_DIR: ${{ env.VCPKG_INSTALLATION_ROOT }}\installed\x64-windows-static\lib
 
@@ -211,7 +211,7 @@ jobs:
   #           ${{ runner.os }}-cargo-
   #
   #     - name: Build with libusb
-  #       run: cargo build --release --features libusb --package antumbra --target aarch64-apple-darwin
+  #       run: cargo build --release --features libusb --target aarch64-apple-darwin
   #
   #     - name: Strip binary
   #       run: strip target/aarch64-apple-darwin/release/antumbra
