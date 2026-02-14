@@ -10,8 +10,39 @@ pub use aarch64::Aarch64Analyzer;
 pub use arm::ArmAnalyzer;
 use downcast_rs::{Downcast, impl_downcast};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arch {
+    Arm,
+    Aarch64,
+}
+
+impl Arch {
+    pub fn is_arm64(self) -> bool {
+        matches!(self, Arch::Aarch64)
+    }
+}
+
 /// Architecture-agnostic binary analysis trait.
 pub trait ArchAnalyzer: Downcast {
+    /// Returns the underlying binary data.
+    fn data(&self) -> &[u8];
+
+    /// Returns the length of the binary data.
+    fn len(&self) -> usize {
+        self.data().len()
+    }
+
+    /// Returns true if the binary data is empty.
+    fn is_empty(&self) -> bool {
+        self.data().is_empty()
+    }
+
+    /// Reads a little-endian u32 at the given offset.
+    fn read_u32(&self, offset: usize) -> Option<u32> {
+        let bytes = self.data().get(offset..offset + 4)?;
+        Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
     /// Converts a virtual address to a file offset.
     fn va_to_offset(&self, va: u64) -> Option<usize>;
 
@@ -47,8 +78,14 @@ pub trait ArchAnalyzer: Downcast {
         let va = self.get_bl_target(offset)?;
         self.va_to_offset(va)
     }
-
-    fn data(&self) -> &[u8];
 }
 
 impl_downcast!(ArchAnalyzer);
+
+/// Small helper because it's a bit annoying doing this manually
+pub fn create_analyzer(data: Vec<u8>, base_addr: u64, arch: Arch) -> Box<dyn ArchAnalyzer> {
+    match arch {
+        Arch::Aarch64 => Box::new(Aarch64Analyzer::new(data, base_addr)),
+        Arch::Arm => Box::new(ArmAnalyzer::new(data, base_addr)),
+    }
+}
