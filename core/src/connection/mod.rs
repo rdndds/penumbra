@@ -29,11 +29,39 @@ impl Connection {
         Connection { port, connection_type, baudrate }
     }
 
-    pub async fn write(&mut self, data: &[u8], size: usize) -> Result<Vec<u8>> {
-        self.port.write_all(data).await?;
+    // Writes the provided data to the device
+    pub async fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.port.write_all(data).await
+    }
+
+    // Reads the exact number of bytes required to fill the provided buffer
+    pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.port.read_exact(buf).await
+    }
+
+    // Reads the specified number of bytes
+    pub async fn read_bytes(&mut self, size: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; size];
         self.port.read_exact(&mut buf).await?;
         Ok(buf)
+    }
+
+    async fn read_u16_be(&mut self) -> Result<u16> {
+        let mut buf = [0u8; 2];
+        self.port.read_exact(&mut buf).await?;
+        Ok(u16::from_be_bytes(buf))
+    }
+
+    async fn read_u16_le(&mut self) -> Result<u16> {
+        let mut buf = [0u8; 2];
+        self.port.read_exact(&mut buf).await?;
+        Ok(u16::from_le_bytes(buf))
+    }
+
+    async fn read_u32_be(&mut self) -> Result<u32> {
+        let mut buf = [0u8; 4];
+        self.port.read_exact(&mut buf).await?;
+        Ok(u32::from_be_bytes(buf))
     }
 
     pub fn check(&self, data: &[u8], expected_data: &[u8]) -> Result<()> {
@@ -46,11 +74,13 @@ impl Connection {
     }
 
     pub async fn echo(&mut self, data: &[u8], size: usize) -> Result<()> {
-        self.port.write_all(data).await?;
+        self.write(data).await?;
         let mut buf = vec![0u8; size];
-        self.port.read_exact(&mut buf).await?;
+        self.read(&mut buf).await?;
         self.check(&buf, data)
     }
+
+    /* BROM / Preloader download handlers below :D */
 
     pub async fn handshake(&mut self) -> Result<()> {
         info!("Starting handshake...");
@@ -65,12 +95,9 @@ impl Connection {
         self.echo(&[Command::JumpDa as u8], 1).await?;
         self.echo(&address.to_be_bytes(), 4).await?;
 
-        let mut status = [0u8; 2];
-        self.port.read_exact(&mut status).await?;
-
-        let status_val = u16::from_le_bytes(status);
-        if status_val != 0 {
-            error!("JumpDA failed with status: {:04X}", status_val);
+        let status = self.read_u16_le().await?;
+        if status != 0 {
+            error!("JumpDA failed with status: {:04X}", status);
             return Err(Error::conn("JumpDA failed"));
         }
 
@@ -90,13 +117,11 @@ impl Connection {
         self.echo(&(da_len).to_be_bytes(), 4).await?;
         self.echo(&sig_len.to_be_bytes(), 4).await?;
 
-        let mut status = [0u8; 2];
-        self.port.read_exact(&mut status).await?;
-        let status_val = u16::from_be_bytes(status);
-        debug!("Received status: 0x{:04X}", status_val);
+        let status = self.read_u16_be().await?;
+        debug!("Received status: 0x{:04X}", status);
 
-        if status_val != 0 {
-            error!("SendDA command failed with status: {:04X}", status_val);
+        if status != 0 {
+            error!("SendDA command failed with status: {:04X}", status);
             return Err(Error::conn("SendDA command failed"));
         }
 
@@ -104,17 +129,13 @@ impl Connection {
 
         debug!("DA sent!");
 
-        let mut checksum = [0u8; 2];
-        self.port.read_exact(&mut checksum).await?;
-        debug!("Received checksum: {:02X}{:02X}", checksum[0], checksum[1]);
+        let checksum = self.read_u16_be().await?;
+        debug!("Received checksum: 0x{:04X}", checksum);
 
-        let mut status = [0u8; 2];
-        self.port.read_exact(&mut status).await?;
-
-        let status_val = u16::from_be_bytes(status);
-        debug!("Received final status: 0x{:04X}", status_val);
-        if status_val != 0 {
-            error!("SendDA data transfer failed with status: {:04X}", status_val);
+        let status = self.read_u16_be().await?;
+        debug!("Received final status: 0x{:04X}", status);
+        if status != 0 {
+            error!("SendDA data transfer failed with status: {:04X}", status);
             return Err(Error::conn("SendDA data transfer failed"));
         }
 
@@ -124,45 +145,31 @@ impl Connection {
     pub async fn get_hw_code(&mut self) -> Result<u16> {
         self.echo(&[Command::GetHwCode as u8], 1).await?;
 
-        let mut hw_code = [0u8; 2];
-        let mut status = [0u8; 2];
+        let hw_code = self.read_u16_be().await?;
+        let status = self.read_u16_le().await?;
 
-        self.port.read_exact(&mut hw_code).await?;
-        self.port.read_exact(&mut status).await?;
-
-        let status_val = u16::from_le_bytes(status);
-        if status_val != 0 {
-            error!("GetHwCode failed with status: {:04X}", status_val);
+        if status != 0 {
+            error!("GetHwCode failed with status: {:04X}", status);
             return Err(Error::conn("GetHwCode failed"));
         }
 
-        Ok(u16::from_be_bytes(hw_code))
+        Ok(hw_code)
     }
 
     pub async fn get_hw_sw_ver(&mut self) -> Result<(u16, u16, u16)> {
         self.echo(&[Command::GetHwSwVer as u8], 1).await?;
 
-        let mut hw_sub_code = [0u8; 2];
-        let mut hw_ver = [0u8; 2];
-        let mut sw_ver = [0u8; 2];
-        let mut status = [0u8; 2];
+        let hw_sub_code = self.read_u16_le().await?;
+        let hw_ver = self.read_u16_le().await?;
+        let sw_ver = self.read_u16_le().await?;
+        let status = self.read_u16_le().await?;
 
-        self.port.read_exact(&mut hw_sub_code).await?;
-        self.port.read_exact(&mut hw_ver).await?;
-        self.port.read_exact(&mut sw_ver).await?;
-        self.port.read_exact(&mut status).await?;
-
-        let status_val = u16::from_le_bytes(status);
-        if status_val != 0 {
-            error!("GetHwSwVer failed with status: 0x{:04X}", status_val);
+        if status != 0 {
+            error!("GetHwSwVer failed with status: 0x{:04X}", status);
             return Err(Error::conn("GetHwSwVer failed"));
         }
 
-        Ok((
-            u16::from_le_bytes(hw_sub_code),
-            u16::from_le_bytes(hw_ver),
-            u16::from_le_bytes(sw_ver),
-        ))
+        Ok((hw_sub_code, hw_ver, sw_ver))
     }
 
     pub async fn get_soc_id(&mut self) -> Result<Vec<u8>> {
@@ -184,9 +191,7 @@ impl Connection {
         let mut soc_id = vec![0u8; length];
         self.port.read_exact(&mut soc_id).await?;
 
-        let mut status_bytes = [0u8; 2];
-        self.port.read_exact(&mut status_bytes).await?;
-        let status = u16::from_le_bytes(status_bytes);
+        let status = self.read_u16_le().await?;
 
         if status != 0 {
             error!("GetSocId failed with status: 0x{:04X}", status);
@@ -233,9 +238,7 @@ impl Connection {
         let mut meid = vec![0u8; length];
         self.port.read_exact(&mut meid).await?;
 
-        let mut status_bytes = [0u8; 2];
-        self.port.read_exact(&mut status_bytes).await?;
-        let status = u16::from_le_bytes(status_bytes);
+        let status = self.read_u16_le().await?;
 
         if status != 0 {
             error!("GetMeid failed with status: 0x{:04X}", status);
@@ -254,31 +257,24 @@ impl Connection {
     pub async fn get_target_config(&mut self) -> Result<u32> {
         self.echo(&[Command::GetTargetConfig as u8], 1).await?;
 
-        let mut config_bytes = [0u8; 4];
-        self.port.read_exact(&mut config_bytes).await?;
-
-        let mut status_bytes = [0u8; 2];
-        self.port.read_exact(&mut status_bytes).await?;
-        let status = u16::from_le_bytes(status_bytes);
+        let config = self.read_u32_be().await?;
+        let status = self.read_u16_le().await?;
 
         if status != 0 {
             error!("GetTargetConfig failed with status: 0x{:04X}", status);
             return Err(Error::conn("GetTargetConfig failed"));
         }
 
-        Ok(u32::from_be_bytes(config_bytes))
+        Ok(config)
     }
 
     pub async fn get_pl_capabilities(&mut self) -> Result<u32> {
         self.echo(&[Command::GetPlCap as u8], 1).await?;
 
-        let mut cap0 = [0u8; 4];
-        let mut cap1 = [0u8; 4]; // Reserved
+        let cap0 = self.read_u32_be().await?;
+        let _cap1 = self.read_u32_be().await?; // Reserved
 
-        self.port.read_exact(&mut cap0).await?;
-        self.port.read_exact(&mut cap1).await?;
-
-        Ok(u32::from_be_bytes(cap0))
+        Ok(cap0)
     }
 
     /// Reads memory from the device with size, split into 4-byte chunks.
@@ -289,9 +285,7 @@ impl Connection {
         self.echo(&address.to_be_bytes(), 4).await?;
         self.echo(&((aligned / 4) as u32).to_be_bytes(), 4).await?;
 
-        let mut status_bytes = [0u8; 2];
-        self.port.read_exact(&mut status_bytes).await?;
-        let status = u16::from_be_bytes(status_bytes);
+        let status = self.read_u16_be().await?;
         if status != 0 {
             return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
         }
@@ -301,8 +295,7 @@ impl Connection {
             self.port.read_exact(chunk).await?;
         }
 
-        self.port.read_exact(&mut status_bytes).await?;
-        let status = u16::from_be_bytes(status_bytes);
+        let status = self.read_u16_be().await?;
         if status != 0 {
             return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
         }
