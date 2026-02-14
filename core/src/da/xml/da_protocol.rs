@@ -42,23 +42,21 @@ impl DAProtocol for Xml {
 
         self.upload_stage1(da1.addr, da1.length, da1.data.clone(), da1.sig_len)
             .await
-            .map_err(|e| Error::proto(format!("Failed to upload XML DA1: {}", e)))?;
+            .map_err(|e| Error::proto(format!("Failed to upload XML DA1: {e}")))?;
 
         exploit!(Carbonara, self);
 
         let (da2_addr, da2_data) = {
             let da2 = self.da.get_da2().ok_or_else(|| Error::penumbra("DA2 region not found"))?;
-
             let sig_len = da2.sig_len as usize;
             let data = da2.data[..da2.data.len().saturating_sub(sig_len)].to_vec();
-
             (da2.addr, data)
         };
 
         info!("Uploading and booting to XML DA2...");
         if let Err(e) = self.boot_to(da2_addr, &da2_data).await {
             self.reboot(BootMode::Normal).await.ok();
-            return Err(Error::proto(format!("Failed to upload XML DA2: {}", e)));
+            return Err(Error::proto(format!("Failed to upload XML DA2: {e}")));
         }
 
         info!("Successfully uploaded and booted to XML DA2");
@@ -97,21 +95,18 @@ impl DAProtocol for Xml {
     }
 
     async fn send_data(&mut self, data: &[&[u8]]) -> Result<bool> {
-        let mut hdr: [u8; 12];
+        let max_chunk_size = self.write_packet_length.unwrap_or(0x8000);
 
         for param in data {
-            hdr = self.generate_header(param);
-
-            self.conn.port.write_all(&hdr).await?;
+            let hdr = self.generate_header(param);
+            self.conn.write(&hdr).await?;
 
             let mut pos = 0;
-            let max_chunk_size = self.write_packet_length.unwrap_or(0x8000);
-
             while pos < param.len() {
-                let end = param.len().min(pos + max_chunk_size);
+                let end = (pos + max_chunk_size).min(param.len());
                 let chunk = &param[pos..end];
                 debug!("[TX] Sending chunk (0x{:X} bytes)", chunk.len());
-                self.conn.port.write_all(chunk).await?;
+                self.conn.write(chunk).await?;
                 pos = end;
             }
 
@@ -127,13 +122,15 @@ impl DAProtocol for Xml {
     }
 
     async fn shutdown(&mut self) -> Result<()> {
-        match xmlcmd_e!(self, Reboot, "IMMEDIATE".to_string()) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Error::proto(format!("Failed to shutdown device: {}", e))),
-        }
+        info!("Shutting down device...");
+
+        xmlcmd_e!(self, Reboot, "IMMEDIATE".to_string())
+            .map(|_| ())
+            .map_err(|e| Error::proto(format!("Failed to shutdown device: {e}")))
     }
 
     async fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
+        info!("Rebooting device into {:?} mode...", bootmode);
         match bootmode {
             BootMode::Normal | BootMode::HomeScreen => self.shutdown().await?,
             mode => {
@@ -284,13 +281,14 @@ impl DAProtocol for Xml {
 
     #[cfg(not(feature = "no_exploits"))]
     async fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
-        let seccfg = parse_seccfg(self).await;
-        if seccfg.is_none() {
-            error!("[Penumbra] Failed to parse seccfg, cannot set lock state");
-            return None;
-        }
+        let mut seccfg = match parse_seccfg(self).await {
+            Some(s) => s,
+            None => {
+                error!("[Penumbra] Failed to parse seccfg, cannot set lock state");
+                return None;
+            }
+        };
 
-        let mut seccfg = seccfg.unwrap();
         seccfg.set_lock_state(locked);
         write_seccfg(self, &mut seccfg).await
     }

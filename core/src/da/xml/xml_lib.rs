@@ -68,12 +68,12 @@ impl Xml {
     /// Reads data of arbitrary length taken from the header sent by the device.
     pub async fn read_data(&mut self) -> Result<Vec<u8>> {
         let mut hdr = [0u8; 12];
-        self.conn.port.read_exact(&mut hdr).await?;
+        self.conn.read(&mut hdr).await?;
 
         let len = self.parse_header(&hdr)?;
 
         let mut data = vec![0u8; len as usize];
-        self.conn.port.read_exact(&mut data).await?;
+        self.conn.read(&mut data).await?;
 
         Ok(data)
     }

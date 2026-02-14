@@ -11,10 +11,10 @@ use xmlcmd_derive::XmlCommand;
 use crate::da::DAProtocol;
 use crate::da::xml::Xml;
 use crate::da::xml::cmds::{XmlCmdLifetime, XmlCommand};
-use crate::da::xml::patch::{find_sej_base, is_arm64};
+use crate::da::xml::patch::{detect_arch, find_sej_base, to_arch};
 use crate::error::Result;
 use crate::exploit::get_v6_payload;
-use crate::utilities::analysis::{Aarch64Analyzer, ArchAnalyzer, ArmAnalyzer};
+use crate::utilities::analysis::create_analyzer;
 use crate::utilities::patching::{bytes_to_hex, patch_pattern_str};
 use crate::utilities::xml::get_tag;
 
@@ -119,16 +119,12 @@ fn prepare_extensions(xml: &Xml) -> Option<Vec<u8>> {
     let da2address = xml.da.get_da2()?.addr;
     let da2data = &xml.da.get_da2()?.data;
 
-    let is_arm64 = is_arm64(da2data);
+    let is_arm64 = detect_arch(da2data);
     let mut da_ext_data = get_v6_payload(DA_EXT, is_arm64).to_vec();
 
     patch_pattern_str(&mut da_ext_data, "11111111", &bytes_to_hex(&da2address.to_le_bytes()))?;
 
-    let analyzer: Box<dyn ArchAnalyzer> = if is_arm64 {
-        Box::new(Aarch64Analyzer::new(da2data.clone(), da2address as u64))
-    } else {
-        Box::new(ArmAnalyzer::new(da2data.clone(), da2address as u64))
-    };
+    let analyzer = create_analyzer(da2data.clone(), da2address as u64, to_arch(is_arm64));
 
     let download_function_off = analyzer.find_function_from_string("Download host file:%s")?;
     let upload_function_off = analyzer.find_function_from_string("Upload data to host file:%s")?;
