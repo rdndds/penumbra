@@ -319,6 +319,28 @@ impl Device {
         self.protocol.as_deref_mut()
     }
 
+    /// Retrieves the list of partitions from the device.
+    /// If partitions have already been fetched, returns the cached list.
+    /// Otherwise, queries the DA protocol for partition information and caches the result.
+    ///
+    /// Returns an empty list if no DA protocol is available.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// device.enter_da_mode().await?;
+    /// let partitions = device.get_partitions().await;
+    /// for part in &partitions {
+    ///     println!("{}: size={}", part.name, part.size);
+    /// }
+    /// ```
     pub async fn get_partitions(&mut self) -> Vec<Partition> {
         let cached = self.dev_info.partitions().await;
         if !cached.is_empty() {
@@ -380,6 +402,23 @@ impl Device {
         protocol.write_flash(part.address, part.size, reader, part.kind, progress).await
     }
 
+    /// Erases a specified partition on the device.
+    /// This function assumes the partition to be part of the user section.
+    /// To erase other sections, use `erase_offset` with the appropriate address.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let mut progress = |_erased: usize, _total: usize| {};
+    /// device.erase_partition("userdata", &mut progress).await?;
+    /// ```
     pub async fn erase_partition(
         &mut self,
         partition: &str,
@@ -472,6 +511,26 @@ impl Device {
         protocol.write_flash(address, size, reader, section, progress).await
     }
 
+    /// Erases data at a specified offset and size on the device.
+    /// This allows erasing arbitrary locations, not limited to named partitions.
+    /// To specify the section (e.g., user, pl_part1, pl_part2), provide the appropriate
+    /// `PartitionKind`.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, PartitionKind, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let mut progress = |_erased: usize, _total: usize| {};
+    /// device
+    ///     .erase_offset(0x0, 0x40000, PartitionKind::Emmc(EmmcPartition::Boot1), &mut progress)
+    ///     .await?;
+    /// ```
     pub async fn erase_offset(
         &mut self,
         address: u64,
@@ -552,6 +611,21 @@ impl Device {
         protocol.upload(partition.to_string(), writer, progress).await
     }
 
+    /// Formats a specified partition on the device
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let mut progress = |_erased: usize, _total: usize| {};
+    /// device.format("userdata", &mut progress).await?;
+    /// ```
     pub async fn format(
         &mut self,
         partition: &str,
@@ -563,6 +637,20 @@ impl Device {
         protocol.format(partition.to_string(), progress).await
     }
 
+    /// Shuts down the device
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// device.shutdown().await?;
+    /// ```
     pub async fn shutdown(&mut self) -> Result<()> {
         self.ensure_da_mode().await?;
 
@@ -570,6 +658,21 @@ impl Device {
         protocol.shutdown().await
     }
 
+    /// Reboots the device into the specified boot mode.
+    /// Supported boot modes include `Normal`, `HomeScreen`, `Fastboot`, `Test`, and `Meta`.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{BootMode, DeviceBuilder, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// device.reboot(BootMode::Normal).await?;
+    /// ```
     pub async fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
         self.ensure_da_mode().await?;
 
@@ -577,6 +680,24 @@ impl Device {
         protocol.reboot(bootmode).await
     }
 
+    /// Sets the lock state in `seccfg` to either lock or unlock the bootloader.
+    /// Returns the raw `seccfg` data on success, or `None` if the operation fails.
+    ///
+    /// Only available when the `no_exploits` feature is **not** enabled.
+    /// Requires DA Extensions.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, LockFlag, find_mtk_port};
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let seccfg = device.set_seccfg_lock_state(LockFlag::Unlock).await;
+    /// ```
     #[cfg(not(feature = "no_exploits"))]
     pub async fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<Vec<u8>> {
         // Ensure DA mode first; this will populate partitions and storage
@@ -585,6 +706,28 @@ impl Device {
         protocol.set_seccfg_lock_state(lock_state).await
     }
 
+    /// Reads memory from the device at the given address and size.
+    /// The data is written to the provided `writer` as it is read..
+    ///
+    /// Only available when the `no_exploits` feature is **not** enabled.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    /// use tokio::fs::File;
+    /// use tokio::io::BufWriter;
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let file = File::create("dump.bin").await?;
+    /// let mut writer = BufWriter::new(file);
+    /// let mut progress = |_read: usize, _total: usize| {};
+    /// device.peek(0x0010_0000, 0x1000, &mut writer, &mut progress).await?;
+    /// ```
     #[cfg(not(feature = "no_exploits"))]
     pub async fn peek(
         &mut self,
