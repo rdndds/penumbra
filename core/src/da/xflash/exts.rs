@@ -17,8 +17,8 @@ use log::{debug, info};
 use crate::da::DAProtocol;
 use crate::da::xflash::{Cmd, XFlash};
 use crate::error::{Error, Result};
-use crate::extract_ptr;
 use crate::utilities::patching::{HEX_NOT_FOUND, find_pattern, patch_ptr};
+use crate::{extract_ptr, le_u32};
 
 const DA_EXT: &[u8] = include_bytes!("../../../payloads/da_x.bin");
 
@@ -165,7 +165,7 @@ pub async fn read32_ext(xflash: &mut XFlash, addr: u32) -> Result<u32> {
     let payload = xflash.read_data().await?;
     status_ok!(xflash);
 
-    Ok(u32::from_le_bytes(payload[0..4].try_into().unwrap()))
+    Ok(le_u32!(payload, 0))
 }
 
 pub async fn write32_ext(xflash: &mut XFlash, addr: u32, value: u32) -> Result<()> {

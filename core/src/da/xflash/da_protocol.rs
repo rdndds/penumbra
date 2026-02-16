@@ -25,9 +25,9 @@ use crate::da::xflash::patch;
 use crate::da::xflash::sec::{parse_seccfg, write_seccfg};
 use crate::da::{DA, DAEntryRegion, DAProtocol, XFlash};
 use crate::error::{Error, Result, XFlashError};
-use crate::exploit;
 #[cfg(not(feature = "no_exploits"))]
 use crate::exploit::{Carbonara, Exploit, Kamakiri};
+use crate::{exploit, le_u16, le_u32};
 
 #[async_trait::async_trait]
 impl DAProtocol for XFlash {
@@ -57,7 +57,7 @@ impl DAProtocol for XFlash {
             Ok(true) => {
                 info!("[Penumbra] Successfully uploaded and executed DA2");
                 self.handle_sla().await?;
-                flash::get_packet_length(self).await?;
+                flash::get_packet_length(self).await?; // Re-query packet length for DA loop, for faster speeds :)
 
                 #[cfg(not(feature = "no_exploits"))]
                 self.boot_extensions().await?;
@@ -77,9 +77,9 @@ impl DAProtocol for XFlash {
 
         // Addr (LE) | Length (LE)
         // 00000040000000002c83050000000000 -> addr=0x4000000, len=0x0005832c
-        let mut param = Vec::new();
-        param.extend_from_slice(&(addr as u64).to_le_bytes());
-        param.extend_from_slice(&(data.len() as u64).to_le_bytes());
+        let mut param = [0u8; 16];
+        param[0..8].copy_from_slice(&(addr as u64).to_le_bytes());
+        param[8..16].copy_from_slice(&(data.len() as u64).to_le_bytes());
 
         self.send_data(&[&param, data]).await?;
 
@@ -94,7 +94,7 @@ impl DAProtocol for XFlash {
         for param in data {
             hdr = self.generate_header(param);
 
-            self.conn.port.write_all(&hdr).await?;
+            self.conn.write(&hdr).await?;
 
             let mut pos = 0;
             let max_chunk_size = self.write_packet_length.unwrap_or(0x8000);
@@ -103,7 +103,7 @@ impl DAProtocol for XFlash {
                 let end = param.len().min(pos + max_chunk_size);
                 let chunk = &param[pos..end];
                 debug!("[TX] Sending chunk (0x{:X} bytes)", chunk.len());
-                self.conn.port.write_all(chunk).await?;
+                self.conn.write(chunk).await?;
                 pos = end;
             }
 
@@ -117,7 +117,7 @@ impl DAProtocol for XFlash {
 
     async fn get_status(&mut self) -> Result<u32> {
         let mut hdr = [0u8; 12];
-        match timeout(Duration::from_millis(3000), self.conn.port.read_exact(&mut hdr)).await {
+        match timeout(Duration::from_millis(3000), self.conn.read(&mut hdr)).await {
             Ok(result) => result?,
             Err(_) => {
                 debug!("Status timeout");
@@ -129,14 +129,14 @@ impl DAProtocol for XFlash {
         let len = self.parse_header(&hdr)?;
 
         let mut data = vec![0u8; len as usize];
-        self.conn.port.read_exact(&mut data).await?;
+        self.conn.read(&mut data).await?;
         let status = match len {
-            2 => u16::from_le_bytes(data[0..2].try_into().unwrap()) as u32,
+            2 => le_u16!(data, 0) as u32,
             4 => {
-                let val = u32::from_le_bytes(data[0..4].try_into().unwrap());
+                let val = le_u32!(data, 0);
                 if val == Cmd::Magic as u32 { 0 } else { val }
             }
-            _ if data.len() >= 4 => u32::from_le_bytes(data[0..4].try_into().unwrap()),
+            _ if data.len() >= 4 => le_u32!(data, 0),
             _ if !data.is_empty() => data[0] as u32,
             _ => 0xFFFFFFFF,
         };
@@ -166,9 +166,9 @@ impl DAProtocol for XFlash {
             0, // bNotDisconnectUSB (0 = disconnect USB)
         ];
 
-        let mut buf = Vec::with_capacity(28);
-        for v in params {
-            buf.extend_from_slice(&v.to_le_bytes());
+        let mut buf = [0u8; 28];
+        for (i, v) in params.iter().enumerate() {
+            buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
         }
 
         info!("Shutting down device...");
@@ -190,20 +190,21 @@ impl DAProtocol for XFlash {
         };
 
         let params: [u32; 7] = [
-            1, // is_dev_reboot
-            0, // timeout_ms (0 = default, WDT decides)
-            0, // async
-            bootup, 0, // dlbit
-            0, // bNotResetRTCTime
-            0, // bNotDisconnectUSB
+            1,      // is_dev_reboot
+            0,      // timeout_ms (0 = default, WDT decides)
+            0,      // async
+            bootup, // bootup
+            0,      // dlbit
+            0,      // bNotResetRTCTime
+            0,      // bNotDisconnectUSB
         ];
 
-        info!("Rebooting device into {:?} mode...", bootmode);
-
-        let mut buf = Vec::with_capacity(28);
-        for v in params {
-            buf.extend_from_slice(&v.to_le_bytes());
+        let mut buf = [0u8; 28];
+        for (i, v) in params.iter().enumerate() {
+            buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
         }
+
+        info!("Rebooting device into {:?} mode...", bootmode);
 
         self.send(&buf).await?;
 
@@ -273,7 +274,7 @@ impl DAProtocol for XFlash {
     async fn get_usb_speed(&mut self) -> Result<u32> {
         let usb_speed = self.devctrl(Cmd::GetUsbSpeed, None).await?;
         debug!("USB Speed Data: {:?}", usb_speed);
-        Ok(u32::from_le_bytes(usb_speed[0..4].try_into().unwrap()))
+        Ok(le_u32!(usb_speed, 0))
     }
 
     fn get_connection(&mut self) -> &mut Connection {
@@ -298,7 +299,7 @@ impl DAProtocol for XFlash {
             debug!("Short read: expected 4 bytes, got {}", resp.len());
             return Err(Error::io("Short register read"));
         }
-        Ok(u32::from_le_bytes(resp[0..4].try_into().unwrap()))
+        Ok(le_u32!(resp, 0))
     }
 
     async fn write32(&mut self, addr: u32, value: u32) -> Result<()> {
@@ -306,9 +307,9 @@ impl DAProtocol for XFlash {
         if self.using_exts {
             return write32_ext(self, addr, value).await;
         }
-        let mut param = Vec::new();
-        param.extend_from_slice(&addr.to_le_bytes());
-        param.extend_from_slice(&value.to_le_bytes());
+        let mut param = [0u8; 8];
+        param[0..4].copy_from_slice(&addr.to_le_bytes());
+        param[4..8].copy_from_slice(&value.to_le_bytes());
         debug!("[TX] Writing 32-bit value 0x{:08X} to address 0x{:08X}", value, addr);
         self.devctrl(Cmd::SetRegisterValue, Some(&[&param])).await?;
         Ok(())

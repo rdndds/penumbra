@@ -68,12 +68,12 @@ impl Xml {
     /// Reads data of arbitrary length taken from the header sent by the device.
     pub async fn read_data(&mut self) -> Result<Vec<u8>> {
         let mut hdr = [0u8; 12];
-        self.conn.port.read_exact(&mut hdr).await?;
+        self.conn.read(&mut hdr).await?;
 
         let len = self.parse_header(&hdr)?;
 
         let mut data = vec![0u8; len as usize];
-        self.conn.port.read_exact(&mut data).await?;
+        self.conn.read(&mut data).await?;
 
         Ok(data)
     }
@@ -179,6 +179,13 @@ impl Xml {
         self.send(xml_bytes).await?;
 
         debug!("Sent XML Command: CMD:{}", cmd.cmd_name());
+        cmd.args().iter().for_each(|(section, tag, content)| {
+            if let Some(sec) = section {
+                debug!("  [{}] {}: {}", sec, tag, content);
+            } else {
+                debug!("  {}: {}", tag, content);
+            }
+        });
 
         // Read the ack back.
         // We don't wait for CMD:END here, because each CMD might
@@ -223,6 +230,10 @@ impl Xml {
             debug!("Invalid xml response for CMD:DOWNLOAD-FILE: {}", resp_string);
             return Err(Error::proto("Expected CMD:DOWNLOAD-FILE"));
         }
+
+        let info: String = get_tag(&resp_string, "arg/info").unwrap_or_default();
+        debug!("Received CMD:DOWNLOAD-FILE command.");
+        debug!("  Info: {info}");
 
         // Acknowledge we received the command
         self.ack(None).await?;
@@ -284,6 +295,10 @@ impl Xml {
             return Err(Error::proto("Expected CMD:UPLOAD-FILE"));
         }
 
+        let info: String = get_tag(&resp_string, "arg/info").unwrap_or_default();
+        debug!("Received CMD:UPLOAD-FILE command.");
+        debug!("  Info: {info}");
+
         self.ack(None).await?;
 
         let length_resp = self.read_data().await?;
@@ -334,6 +349,9 @@ impl Xml {
             return Err(Error::proto("Expected CMD:PROGRESS-REPORT"));
         }
 
+        let msg: String = get_tag(&resp_string, "arg/message")?;
+        debug!("Received progress report command. Message: {msg}");
+
         self.ack(None).await?;
 
         let mut resp: Vec<u8> = Vec::new();
@@ -377,6 +395,7 @@ impl Xml {
             return Err(Error::proto("Expected CMD:FILE-SYS-OPERATION"));
         }
 
+        debug!("Received file system operation command: {cmd}");
         self.ack(None).await?;
         self.ack(Some(op.default())).await?;
 

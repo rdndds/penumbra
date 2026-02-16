@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use log::{debug, error, info, warn};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::connection::Connection;
 use crate::core::auth::{AuthManager, SignData, SignPurpose, SignRequest};
@@ -17,6 +18,7 @@ use crate::da::xflash::exts::boot_extensions;
 use crate::da::xflash::storage::detect_storage;
 use crate::da::{DA, DAProtocol};
 use crate::error::{Error, Result, XFlashError};
+use crate::le_u32;
 
 pub struct XFlash {
     pub conn: Connection,
@@ -81,12 +83,12 @@ impl XFlash {
     // or functions like read_flash will fail.
     pub async fn read_data(&mut self) -> Result<Vec<u8>> {
         let mut hdr = [0u8; 12];
-        self.conn.port.read_exact(&mut hdr).await?;
+        self.conn.read(&mut hdr).await?;
 
         let len = self.parse_header(&hdr)?;
 
         let mut data = vec![0u8; len as usize];
-        self.conn.port.read_exact(&mut data).await?;
+        self.conn.read(&mut data).await?;
 
         Ok(data)
     }
@@ -109,7 +111,7 @@ impl XFlash {
 
         let sync_byte = {
             let mut sync_buf = [0u8; 1];
-            match self.conn.port.read_exact(&mut sync_buf).await {
+            match self.conn.read(&mut sync_buf).await {
                 Ok(_) => sync_buf[0],
                 Err(e) => return Err(Error::io(e.to_string())),
             }
@@ -122,13 +124,13 @@ impl XFlash {
         }
 
         let hdr = self.generate_header(&[0u8; 4]);
-        self.conn.port.write_all(&hdr).await?;
-        self.conn.port.write_all(&(Cmd::SyncSignal as u32).to_le_bytes()).await?;
+        self.conn.write(&hdr).await?;
+        self.conn.write(&(Cmd::SyncSignal as u32).to_le_bytes()).await?;
 
-        /// We can only set the environment parameters once, and for whatever reason if we set the
-        /// log level to DEBUG and try to send EMI settings in BROM mode, the DA hangs. This
-        /// appears to be a MediaTek quirk as usual. As a workaround, we always use INFO
-        /// level when in BROM mode, even if verbose logging is requested.
+        // We can only set the environment parameters once, and for whatever reason if we set the
+        // log level to DEBUG and try to send EMI settings in BROM mode, the DA hangs. This
+        // appears to be a MediaTek quirk as usual. As a workaround, we always use INFO
+        // level when in BROM mode, even if verbose logging is requested.
         let da_log_level: u32 = if self.verbose
             && self.conn.connection_type != crate::connection::port::ConnectionType::Brom
         {
@@ -137,21 +139,21 @@ impl XFlash {
             2 // INFO
         };
 
-        let mut env_param = Vec::new();
-        env_param.extend_from_slice(&da_log_level.to_le_bytes()); // da_log_level
-        env_param.extend_from_slice(&1u32.to_le_bytes()); // log_channel = 1 (UART)
-        env_param.extend_from_slice(&1u32.to_le_bytes()); // system_os = 1 (OS_LINUX)
-        env_param.extend_from_slice(&0u32.to_le_bytes()); // ufs_provision = 0
-        env_param.extend_from_slice(&0u32.to_le_bytes()); // ...
+        let env_params: [u32; 5] = [
+            da_log_level, // da_log_level
+            1,            // log_channel = UART
+            1,            // system_os = OS_LINUX
+            0,            // ufs_provision
+            0,            // reserved
+        ];
+        let mut env_buf = [0u8; 20];
+        for (i, v) in env_params.iter().enumerate() {
+            env_buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
+        }
 
-        self.conn.port.write_all(&hdr).await?;
-        self.conn.port.write_all(&(Cmd::SetupEnvironment as u32).to_le_bytes()).await?;
-        self.send(&env_param).await?;
+        self.send_data(&[&(Cmd::SetupEnvironment as u32).to_le_bytes(), &env_buf]).await?;
 
-        self.conn.port.write_all(&hdr).await?;
-        self.conn.port.write_all(&(Cmd::SetupHwInitParams as u32).to_le_bytes()).await?;
-        let hw_param = [0x00, 0x00, 0x00, 0x00];
-        self.send(&hw_param).await?;
+        self.send_data(&[&(Cmd::SetupHwInitParams as u32).to_le_bytes(), &[0u8; 4]]).await?;
 
         status_any!(self, Cmd::SyncSignal as u32);
 
@@ -188,6 +190,128 @@ impl XFlash {
         None
     }
 
+    /// Receives data from the device, writing it to the provided writer.
+    /// Common loop for `read_flash` and `upload`.
+    pub async fn upload_data(
+        &mut self,
+        size: usize,
+        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        let mut bytes_read = 0;
+        progress(0, size);
+        loop {
+            let chunk = self.read_data().await?;
+            if chunk.is_empty() {
+                debug!("No data received, breaking.");
+                break;
+            }
+
+            writer.write_all(&chunk).await?;
+            bytes_read += chunk.len();
+
+            self.send(&[0u8; 4]).await?;
+
+            progress(bytes_read, size);
+
+            if bytes_read >= size {
+                debug!("Requested size read. Breaking.");
+                break;
+            }
+
+            debug!("Read {:X}/{:X} bytes...", bytes_read, size);
+        }
+
+        Ok(())
+    }
+
+    /// Sends data to the device from the provided reader.
+    /// Common loop for `write_flash` and `download`.
+    ///
+    /// If we receive less data than requested from the reader,
+    /// we pad the remaining bytes with 0s and send it anyway.
+    pub async fn download_data(
+        &mut self,
+        size: usize,
+        reader: &mut (dyn AsyncRead + Unpin + Send),
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        let chunk_size = self.write_packet_length.unwrap_or(0x8000);
+        let mut buffer = vec![0u8; chunk_size];
+        let mut bytes_written = 0;
+
+        progress(0, size);
+        loop {
+            if bytes_written >= size {
+                break;
+            }
+
+            // It is mandatory to make data size the same as size, or we will be leaving
+            // older data in the partition. Usually, this is not an issue for partitions
+            // with an header, like LK (which stores the start and length of the lk image),
+            // but for other partitions, this might make the partition unusable.
+            // This issue only arises when flashing stuff that is not coming from a dump made
+            // with read_flash() or any other tool like mtkclient.
+            let remaining = size - bytes_written;
+            let to_read = remaining.min(chunk_size);
+
+            let bytes_read = reader.read(&mut buffer[..to_read]).await?;
+            let chunk = if bytes_read == 0 {
+                &buffer[..to_read]
+            } else if bytes_read < to_read {
+                buffer[bytes_read..to_read].fill(0);
+                &buffer[..to_read]
+            } else {
+                &buffer[..to_read]
+            };
+
+            // DA expects a checksum of the data chunk before the actual data
+            // The actual checksum is a additive 16-bit checksum (Good job MTK!!)
+            // For whoever is reading this code and has no clue what this is doing:
+            // Just sum all bytes then AND with 0xFFFF :D!!!
+            let checksum = chunk.iter().fold(0u32, |total, &byte| total + byte as u32) & 0xFFFF;
+            self.send_data(&[&0u32.to_le_bytes(), &checksum.to_le_bytes(), chunk]).await?;
+
+            bytes_written += chunk.len();
+            progress(bytes_written, size);
+            debug!("Written {}/{} bytes...", bytes_written, size);
+        }
+
+        status_ok!(self);
+
+        Ok(())
+    }
+
+    pub async fn progress_report(
+        &mut self,
+        size: usize,
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        progress(0, size);
+        loop {
+            let status = self.read_data().await?;
+            if le_u32!(status, 0) == 0x40040005 {
+                progress(size, size);
+                break;
+            }
+
+            let status = self.read_data().await?;
+            let progress_percent = le_u32!(status, 0);
+
+            // The device doesn't send statuses during erase/format, so we have to send
+            // an acknowledgment manually through the port and not through send()
+            let ack = [0u8; 4];
+            let hdr = self.generate_header(&ack);
+            self.conn.write(&hdr).await?;
+            self.conn.write(&ack).await?;
+
+            let progress_bytes = (progress_percent as usize * size) / 100;
+            progress(progress_bytes, size);
+        }
+
+        Ok(())
+    }
+
     pub(super) fn generate_header(&self, data: &[u8]) -> [u8; 12] {
         let mut hdr = [0u8; 12];
 
@@ -202,8 +326,8 @@ impl XFlash {
     }
 
     pub(super) fn parse_header(&self, hdr: &[u8; 12]) -> Result<u32> {
-        let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-        let len = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
+        let magic = le_u32!(hdr, 0);
+        let len = le_u32!(hdr, 8);
 
         if magic != Cmd::Magic as u32 {
             return Err(Error::io("Invalid magic"));
@@ -247,7 +371,7 @@ impl XFlash {
             }
         };
 
-        let sla_enabled = u32::from_le_bytes(resp[0..4].try_into().unwrap()) != 0;
+        let sla_enabled = le_u32!(resp, 0) != 0;
 
         if !sla_enabled {
             return Ok(true);

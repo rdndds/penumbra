@@ -15,18 +15,6 @@ impl Aarch64Analyzer {
         Self { data, base_addr }
     }
 
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    pub fn read_u32(&self, offset: usize) -> Option<u32> {
-        self.data.get(offset..offset + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    }
-
     /// Decodes ADRP instruction.
     ///
     /// ADRP Encoding:
@@ -72,6 +60,10 @@ impl Aarch64Analyzer {
         let imm = if shift != 0 { imm12 << 12 } else { imm12 };
 
         Some((rn, rd, imm))
+    }
+
+    pub fn is_pointer_auth(&self, instr: u32) -> bool {
+        instr == 0xD503233F || instr == 0xD503237F || instr == 0xD50303BF
     }
 
     /// Decodes BL instruction.

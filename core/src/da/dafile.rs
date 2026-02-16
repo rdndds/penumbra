@@ -5,6 +5,7 @@
 use log::debug;
 
 use crate::error::{Error, Result};
+use crate::{le_u16, le_u32};
 
 /// Protocol used by the DA
 /// - Legacy: Old DA, used in old devices
@@ -88,8 +89,8 @@ impl DAFile {
         }
 
         let _da_id = String::from_utf8_lossy(&hdr[0x20..0x60]).trim_end_matches('\0').to_string();
-        let _version = u32::from_le_bytes(hdr[0x60..0x64].try_into().unwrap());
-        let num_socs = u32::from_le_bytes(hdr[0x68..0x6C].try_into().unwrap());
+        let _version = le_u32!(hdr, 0x60);
+        let num_socs = le_u32!(hdr, 0x68);
         let _magic_number = &hdr[0x64..0x68];
 
         let da_entry_size = match da_type {
@@ -106,12 +107,12 @@ impl DAFile {
             let mut inner_da_type = da_type.clone();
 
             // For each DA, we parse its header entry
-            let magic = u16::from_le_bytes(da_entry[0x00..0x02].try_into().unwrap());
-            let hw_code = u16::from_le_bytes(da_entry[0x02..0x04].try_into().unwrap());
-            let hw_sub_code = u16::from_le_bytes(da_entry[0x04..0x06].try_into().unwrap());
-            let _hw_version = u16::from_le_bytes(da_entry[0x06..0x08].try_into().unwrap());
+            let magic = le_u16!(da_entry, 0x00);
+            let hw_code = le_u16!(da_entry, 0x02);
+            let hw_sub_code = le_u16!(da_entry, 0x04);
+            let _hw_version = le_u16!(da_entry, 0x06);
             let mut regions: Vec<DAEntryRegion> = Vec::new();
-            let region_count = u16::from_le_bytes(da_entry[0x12..0x14].try_into().unwrap());
+            let region_count = le_u16!(da_entry, 0x12);
             // Structure of the DA header entry
             // 0x00	magic	u16
             // 0x02	hw_code	u16
@@ -134,11 +135,10 @@ impl DAFile {
                 // 0x10	sig_len (m_sig_len)	u32
                 let region_header_data =
                     &da_entry[current_region_offset..current_region_offset + 20];
-                let offset = u32::from_le_bytes(region_header_data[0x00..0x04].try_into().unwrap());
-                let length = u32::from_le_bytes(region_header_data[0x04..0x08].try_into().unwrap());
-                let addr = u32::from_le_bytes(region_header_data[0x08..0x0C].try_into().unwrap());
-                let sig_len =
-                    u32::from_le_bytes(region_header_data[0x10..0x14].try_into().unwrap());
+                let offset = le_u32!(region_header_data, 0x00);
+                let length = le_u32!(region_header_data, 0x04);
+                let addr = le_u32!(region_header_data, 0x08);
+                let sig_len = le_u32!(region_header_data, 0x10);
                 let region_data: Vec<u8> =
                     raw_data[offset as usize..(offset + length) as usize].to_vec();
                 debug!(

@@ -15,26 +15,6 @@ impl ArmAnalyzer {
         Self { data, base_addr }
     }
 
-    pub fn len(&self) -> usize {
-        self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
-    }
-
-    pub fn read_u32(&self, offset: usize) -> Option<u32> {
-        if offset + 4 > self.data.len() {
-            return None;
-        }
-        Some(u32::from_le_bytes([
-            self.data[offset],
-            self.data[offset + 1],
-            self.data[offset + 2],
-            self.data[offset + 3],
-        ]))
-    }
-
     /// Decodes MOVW instruction.
     /// Returns (register, imm16)
     pub fn decode_movw(&self, instr: u32) -> Option<(u8, u32)> {
