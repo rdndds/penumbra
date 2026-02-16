@@ -62,6 +62,10 @@ impl Aarch64Analyzer {
         Some((rn, rd, imm))
     }
 
+    pub fn is_pointer_auth(&self, instr: u32) -> bool {
+        instr == 0xD503233F || instr == 0xD503237F || instr == 0xD50303BF
+    }
+
     /// Decodes BL instruction.
     ///
     /// Returns the target address.
